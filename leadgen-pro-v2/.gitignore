@@ -1,0 +1,15 @@
+.env
+.env
+node_modules/
+../MEMORY.md
+../USER.md
+../SOUL.md
+../IDENTITY.md
+../AGENTS.md
+../memory/
+../voicedesk/
+../*.md
+../*.py
+../*.json
+../*.html
+../*.command
