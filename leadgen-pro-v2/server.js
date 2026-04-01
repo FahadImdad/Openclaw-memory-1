@@ -1099,16 +1099,41 @@ app.post('/api/amazon', async (req, res) => {
           consecutiveEmpty = 0;
           page_num++;
 
-          // Process books in parallel batches of 10
-          const BATCH_SIZE = 10;
-          for (let i = 0; i < pageBooks.length && keepGoing; i += BATCH_SIZE) {
-            if (verifiedCount >= targetLeads) { keepGoing = false; break; }
+          // Concurrency pool — always keep CONCURRENCY slots busy
+          const CONCURRENCY = 20;
+          saveLog(jobId, 'info', `⚡ Processing ${pageBooks.length} authors with ${CONCURRENCY} concurrent workers...`);
 
-            const batch = pageBooks.slice(i, i + BATCH_SIZE);
-            saveLog(jobId, 'info', `⚡ Processing batch of ${batch.length} authors in parallel...`);
+          // Filter out already-seen ASINs upfront
+          const newBooks = pageBooks.filter(book => {
+            const exists = db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(book.asin);
+            if (exists) { saveLog(jobId, 'info', `⏭️ SKIP: ${book.asin}`); return false; }
+            return true;
+          });
 
-            await Promise.all(batch.map(async (book) => {
-              if (verifiedCount >= targetLeads) return;
+          // Run with concurrency pool
+          let bookIndex = 0;
+          await new Promise((resolveAll) => {
+            let active = 0;
+            let done = 0;
+
+            function startNext() {
+              while (active < CONCURRENCY && bookIndex < newBooks.length && verifiedCount < targetLeads) {
+                const book = newBooks[bookIndex++];
+                active++;
+                processBook(book).then(() => {
+                  active--;
+                  done++;
+                  if (done >= newBooks.length || verifiedCount >= targetLeads) resolveAll();
+                  else startNext();
+                });
+              }
+              if (active === 0) resolveAll();
+            }
+            startNext();
+          });
+
+          async function processBook(book) {
+            if (verifiedCount >= targetLeads) return;
 
             const title = book.title || 'Unknown Title';
             const author = book.author || 'Unknown Author';
@@ -1174,12 +1199,9 @@ app.post('/api/amazon', async (req, res) => {
               const reason = !emailVerified ? 'no verified email' : isDuplicate ? 'duplicate email' : 'no real author website';
               saveLog(jobId, 'info', `📝 Saved (not counted — ${reason}): ${author}`);
             }
-            })); // end Promise.all batch
+          } // end processBook
 
-          await new Promise(r => setTimeout(r, 500)); // small delay between batches
-          }  // end batch for loop
-
-          await new Promise(r => setTimeout(r, 1000));
+          await new Promise(r => setTimeout(r, 500));
         }
       } catch (error) {
         saveLog(jobId, 'error', `❌ Fatal error: ${error.message}`);
