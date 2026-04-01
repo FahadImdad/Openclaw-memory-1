@@ -32,7 +32,7 @@ const CRAIGSLIST_CITIES = [
   'orlando', 'nashville', 'charlotte', 'raleigh', 'saltlakecity', 'lasvegas',
   'sacramento', 'stlouis', 'pittsburgh', 'cleveland',
   'cincinnati', 'columbus', 'indianapolis', 'milwaukee', 'kansascity', 'memphis',
-  'baltimore', 'richmond', 'newjersey', 'brooklyn', 'queens', 'longisland',
+  'baltimore', 'richmond', 'newjersey', 'longisland',
   'orangecounty', 'inlandempire', 'ventura', 'santabarbara', 'fresno', 'bakersfield',
   // Canada
   'toronto', 'vancouver', 'montreal', 'calgary', 'ottawa', 'edmonton', 'winnipeg',
@@ -510,12 +510,13 @@ async function scrapeReddit(keyword, sendEvent, dateFrom, dateTo) {
       sendEvent('log', { level: 'brightdata', message: `🌐 Fetching r/${sub.name}...` });
 
       // Delay between Reddit requests to avoid 429
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 3000));
 
       const response = await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; LeadGenBot/2.0)',
-          'Accept': 'application/json'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+          'Accept-Language': 'en-US,en;q=0.9'
         },
         timeout: 30000
       });
@@ -1059,6 +1060,12 @@ app.post('/api/amazon', async (req, res) => {
 
   console.log(`[${new Date().toISOString()}] Amazon search: dateFrom=${dateFrom}, dateTo=${dateTo}, targetLeads=${targetLeads}`);
 
+  // Prevent duplicate jobs — if one is already running, return that job
+  const existingJob = db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'amazon' AND status = 'running'`).get();
+  if (existingJob) {
+    return res.json({ jobId: existingJob.id, alreadyRunning: true });
+  }
+
   // Create scrape job in DB
   const jobResult = db.prepare(
     `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
@@ -1282,6 +1289,12 @@ app.post('/api/search', async (req, res) => {
 
   console.log(`[${new Date().toISOString()}] Search: "${keyword}" | ${dateFrom} → ${dateTo} | target: ${targetLeads}`);
 
+  // Prevent duplicate jobs — if one is already running, return that job
+  const existingIntentJob = db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'intent' AND status = 'running'`).get();
+  if (existingIntentJob) {
+    return res.json({ jobId: existingIntentJob.id, alreadyRunning: true });
+  }
+
   // Create scrape job
   const jobResult = db.prepare(
     `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
@@ -1362,28 +1375,33 @@ app.post('/api/search', async (req, res) => {
       // ========== UPWORK ==========
       if ((sourceFilter === 'all' || sourceFilter === 'upwork') && verifiedCount < targetLeads) {
         saveLog(jobId, 'info', `🔍 Searching Upwork...`);
-        const upworkPosts = await scrapeUpwork(keyword, dateFrom, dateTo, sendEvent);
+        // Wrapper so scraper functions can log to DB
+        const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
+        const upworkPosts = await scrapeUpwork(keyword, dateFrom, dateTo, logFn);
         await processLeadPosts(upworkPosts, 'upwork');
       }
 
       // ========== FIVERR ==========
       if ((sourceFilter === 'all' || sourceFilter === 'fiverr') && verifiedCount < targetLeads) {
         saveLog(jobId, 'info', `🔍 Searching Fiverr buyer requests...`);
-        const fiverrPosts = await scrapeFiverr(keyword, sendEvent);
+        const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
+        const fiverrPosts = await scrapeFiverr(keyword, logFn);
         await processLeadPosts(fiverrPosts, 'fiverr');
       }
 
       // ========== TWITTER/X ==========
       if ((sourceFilter === 'all' || sourceFilter === 'twitter') && verifiedCount < targetLeads) {
         saveLog(jobId, 'info', `🔍 Searching Twitter/X...`);
-        const twitterPosts = await scrapeTwitter(keyword, dateFrom, dateTo, sendEvent);
+        const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
+        const twitterPosts = await scrapeTwitter(keyword, dateFrom, dateTo, logFn);
         await processLeadPosts(twitterPosts, 'twitter');
       }
 
       // ========== FACEBOOK ==========
       if ((sourceFilter === 'all' || sourceFilter === 'facebook') && verifiedCount < targetLeads) {
         saveLog(jobId, 'info', `🔍 Searching Facebook Groups...`);
-        const fbPosts = await scrapeFacebookGroups(keyword, sendEvent);
+        const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
+        const fbPosts = await scrapeFacebookGroups(keyword, logFn);
         await processLeadPosts(fbPosts, 'facebook');
       }
 
