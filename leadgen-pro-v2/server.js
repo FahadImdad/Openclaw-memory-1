@@ -769,30 +769,56 @@ async function findAuthorContact(authorName, bookTitle, sendEvent) {
 
   const BLOCKED_DOMAINS = ['google.com', 'amazon.com', 'goodreads.com', 'example.com', 'sentry.io',
     'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com', 'linkedin.com',
-    'pinterest.com', 'tumblr.com', 'reddit.com', 'wikipedia.org'];
+    'pinterest.com', 'tumblr.com', 'reddit.com', 'wikipedia.org', 'gstatic.com',
+    'googleapis.com', 'aexp.com', 'bookbub.com', 'barnesandnoble.com', 'audible.com',
+    'thriftbooks.com', 'booksrun.com', 'jstor.org', 'gutenberg.org', 'sermoncentral.com',
+    'bookbeat.com', 'penguinrandomhouse.com', 'tiktok.com', 'gramercybooksbexley.com',
+    'awesomebooks.com', 'bookmans.com', 'hymnary.org', 'jacket2.org', 'jimruttshow.com',
+    'helpingcouplesheal.com', 'ieee.es', 'alabama.gov', 'bookmanager.com'];
 
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
   function isBlockedEmail(email) {
-    if (email.match(/\.(png|jpg|jpeg|gif|svg|webp)$/i)) return true;
-    return BLOCKED_DOMAINS.some(d => email.includes(d));
+    // Block file extensions masquerading as emails
+    if (email.match(/\.(png|jpg|jpeg|gif|svg|webp|js|css|min\.js|ts)(@|$)/i)) return true;
+    // Block obvious fake/placeholder emails
+    if (/^(user|admin|info|noreply|no-reply|test|example|support|help|contact|sales|hello)@/i.test(email)) return true;
+    // Block emails with version numbers (npm package names)
+    if (/\d+\.\d+\.\d+/.test(email)) return true;
+    // Block very long local parts (likely code artifacts)
+    if (email.split('@')[0].length > 40) return true;
+    // Block blocked domains
+    if (BLOCKED_DOMAINS.some(d => email.toLowerCase().includes(d))) return true;
+    // Block emails that don't look like real personal/business emails
+    const domain = email.split('@')[1] || '';
+    if (!domain.includes('.')) return true;
+    return false;
   }
 
+  const BLOCKED_WEBSITE_PATTERNS = [
+    'google.', 'gstatic.com', 'googleapis.com', 'amazon.', 'goodreads.com',
+    'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com', 'linkedin.com',
+    'pinterest.com', 'reddit.com', 'wikipedia.org', 'bookbub.com', 'audible.com',
+    'barnesandnoble.com', 'thriftbooks.com', 'booksrun.com', 'jstor.org',
+    'gutenberg.org', 'penguinrandomhouse.com', 'tiktok.com', 'apple.com',
+    'microsoft.com', 'cloudflare.com', 'wp.com', 'blogger.com'
+  ];
+
   function extractWebsiteFromHtml(html) {
-    // Extract URLs from href attributes, filter out blocked domains
     const urlRegex = /href="(https?:\/\/[^"]+)"/g;
     let match;
     const candidates = [];
     while ((match = urlRegex.exec(html)) !== null) {
       const url = match[1];
       try {
-        const host = new URL(url).hostname;
-        if (!BLOCKED_DOMAINS.some(d => host.includes(d)) && !url.includes('google.com')) {
-          candidates.push(url.split('?')[0]); // strip query params
+        const host = new URL(url).hostname.toLowerCase();
+        const isBlocked = BLOCKED_WEBSITE_PATTERNS.some(d => host.includes(d));
+        // Prefer personal/author websites — short domain, no subpaths that look like aggregators
+        if (!isBlocked && !url.includes('/search?') && !url.includes('?q=')) {
+          candidates.push(url.split('?')[0]);
         }
       } catch (e) { /* skip malformed */ }
     }
-    // Return first clean candidate
     return candidates.length > 0 ? candidates[0] : null;
   }
 
