@@ -604,6 +604,17 @@ app.get('/api/jobs', (req, res) => {
   res.json(jobs);
 });
 
+// DELETE /api/jobs/:jobId — delete a job and its leads
+app.delete('/api/jobs/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const job = db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  db.prepare('DELETE FROM amazon_leads WHERE job_id = ?').run(jobId);
+  db.prepare('DELETE FROM intent_leads WHERE job_id = ?').run(jobId);
+  db.prepare('DELETE FROM scrape_jobs WHERE id = ?').run(jobId);
+  res.json({ success: true, deleted: jobId });
+});
+
 // GET /api/export/:jobId — CSV export (verified, non-duplicate only)
 app.get('/api/export/:jobId', (req, res) => {
   const { jobId } = req.params;

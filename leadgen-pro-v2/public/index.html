@@ -465,8 +465,8 @@
       }
 
       container.innerHTML = filtered.map(job => `
-        <div class="bg-gray-700 rounded-lg p-3 mb-2 flex items-center justify-between">
-          <div>
+        <div class="bg-gray-700 rounded-lg p-3 mb-2 flex items-center justify-between" id="job-row-${job.id}">
+          <div class="flex-1 min-w-0 mr-3">
             <span class="text-sm font-medium text-white">${job.date_from} → ${job.date_to}</span>
             ${job.keyword ? `<span class="text-xs text-gray-400 ml-2">"${escapeHtml(job.keyword)}"</span>` : ''}
             <div class="text-xs text-gray-400 mt-0.5">
@@ -475,12 +475,40 @@
               <span class="${job.status === 'complete' ? 'text-green-400' : 'text-yellow-400'}">${job.status}</span>
             </div>
           </div>
-          <a href="/api/export/${job.id}?framework=${framework}&verifiedOnly=true"
-             class="px-3 py-1 bg-green-600 hover:bg-green-700 text-sm rounded text-white whitespace-nowrap">
-            📥 Download
-          </a>
+          <div class="flex items-center gap-2 shrink-0">
+            <a href="/api/export/${job.id}?framework=${framework}&verifiedOnly=true"
+               class="px-3 py-1 bg-green-600 hover:bg-green-700 text-sm rounded text-white whitespace-nowrap">
+              📥 Download
+            </a>
+            <button onclick="deleteJob(${job.id}, '${framework}')"
+                    class="w-7 h-7 flex items-center justify-center rounded bg-gray-600 hover:bg-red-600 text-gray-300 hover:text-white transition text-sm"
+                    title="Delete this job">
+              ✕
+            </button>
+          </div>
         </div>
       `).join('');
+    }
+
+    async function deleteJob(jobId, framework) {
+      if (!confirm(`Delete this scrape job and all its leads? This cannot be undone.`)) return;
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          const row = document.getElementById(`job-row-${jobId}`);
+          if (row) row.remove();
+          // If no rows left, reload to show "no scrapes" state
+          const container = document.getElementById(`jobsList-${framework}`);
+          if (container && !container.querySelector('[id^="job-row-"]')) {
+            loadJobs(framework);
+          }
+        } else {
+          alert('Failed to delete: ' + (data.error || 'Unknown error'));
+        }
+      } catch(e) {
+        alert('Error: ' + e.message);
+      }
     }
 
     function showScrapeForm(framework) {
