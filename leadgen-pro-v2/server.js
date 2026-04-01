@@ -1237,9 +1237,16 @@ app.post('/api/amazon', async (req, res) => {
           consecutiveEmpty = 0;
           page_num++;
 
-          // Process each book
-          for (const book of pageBooks) {
+          // Process books in parallel batches of 5
+          const BATCH_SIZE = 5;
+          for (let i = 0; i < pageBooks.length && keepGoing; i += BATCH_SIZE) {
             if (verifiedCount >= targetLeads) { keepGoing = false; break; }
+
+            const batch = pageBooks.slice(i, i + BATCH_SIZE);
+            saveLog(jobId, 'info', `⚡ Processing batch of ${batch.length} authors in parallel...`);
+
+            await Promise.all(batch.map(async (book) => {
+              if (verifiedCount >= targetLeads) return;
 
             const title = book.title || 'Unknown Title';
             const author = book.author || 'Unknown Author';
@@ -1250,7 +1257,7 @@ app.post('/api/amazon', async (req, res) => {
             const asinExists = db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(asin);
             if (asinExists) {
               saveLog(jobId, 'info', `⏭️ SKIP (seen ASIN): ${asin}`);
-              continue;
+              return;
             }
 
             saveLog(jobId, 'info', `📚 Processing: "${title}" by ${author}`);
@@ -1292,11 +1299,10 @@ app.post('/api/amazon', async (req, res) => {
             } catch (dbErr) {
               // UNIQUE constraint hit (race condition) — skip
               saveLog(jobId, 'warning', `⚠️ DB insert skipped (dupe): ${asin}`);
-              continue;
+              return;
             }
 
-            // Only count if ALL 4 checks pass:
-            // 1. Email verified  2. Non-duplicate email  3. Real author website  4. ASIN not seen (already checked)
+            // Only count if ALL 4 checks pass
             if (emailVerified && isDuplicate === 0 && hasRealWebsite) {
               verifiedCount++;
               db.prepare('UPDATE scrape_jobs SET verified_count = ?, total_count = ? WHERE id = ?').run(verifiedCount, totalCount, jobId);
@@ -1304,13 +1310,14 @@ app.post('/api/amazon', async (req, res) => {
             } else {
               db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
               const reason = !emailVerified ? 'no verified email' : isDuplicate ? 'duplicate email' : 'no real author website';
-              saveLog(jobId, 'info', `📝 Saved to DB (not counted — ${reason}): ${author}`);
+              saveLog(jobId, 'info', `📝 Saved (not counted — ${reason}): ${author}`);
             }
+            })); // end Promise.all batch
 
-            await new Promise(r => setTimeout(r, 1000));
-          }
+          await new Promise(r => setTimeout(r, 500)); // small delay between batches
+          }  // end batch for loop
 
-          await new Promise(r => setTimeout(r, 1500));
+          await new Promise(r => setTimeout(r, 1000));
         }
       } catch (error) {
         saveLog(jobId, 'error', `❌ Fatal error: ${error.message}`);
