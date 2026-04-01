@@ -797,18 +797,32 @@ app.post('/api/amazon', async (req, res) => {
 
         // Check for CAPTCHA
         if (html.includes('captchacharacters') || html.includes('Type the characters you see')) {
-          sendEvent('log', { level: 'warning', message: `⚠️ CAPTCHA on page ${page_num} — Web Unlocker should bypass, retrying in 5s...` });
+          sendEvent('log', { level: 'warning', message: `⚠️ CAPTCHA on page ${page_num} — retrying in 5s...` });
           await new Promise(r => setTimeout(r, 5000));
           continue;
+        }
+
+        // Debug: count data-asin occurrences
+        const asinCount = (html.match(/data-asin=/gi) || []).length;
+        const hasResults = html.includes('s-search-result') || html.includes('s-result-item');
+        sendEvent('log', { level: 'info', message: `🔍 data-asin occurrences: ${asinCount} | has s-search-result: ${hasResults}` });
+
+        // Log first occurrence of data-asin for debugging
+        const firstAsinIdx = html.toLowerCase().indexOf('data-asin=');
+        if (firstAsinIdx > -1) {
+          sendEvent('log', { level: 'info', message: `📌 First data-asin: ...${html.substring(firstAsinIdx, firstAsinIdx + 80)}...` });
+        } else {
+          // No data-asin at all — log what the HTML looks like around "result"
+          const resultIdx = html.toLowerCase().indexOf('result');
+          if (resultIdx > -1) {
+            sendEvent('log', { level: 'warning', message: `⚠️ No data-asin found. Near "result": ${html.substring(resultIdx, resultIdx + 200).replace(/\n/g,' ')}` });
+          }
         }
 
         pageBooks = parseAmazonSearchHtml(html);
         sendEvent('log', { level: pageBooks.length > 0 ? 'success' : 'warning', message: `📚 Page ${page_num}: ${pageBooks.length} books parsed` });
 
         if (pageBooks.length === 0) {
-          // Log snippet to see what we got
-          const snippet = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').substring(0, 300);
-          sendEvent('log', { level: 'warning', message: `⚠️ HTML snippet: ${snippet}` });
           consecutiveEmpty++;
           if (consecutiveEmpty >= 2) break;
           page_num++;
@@ -1116,21 +1130,32 @@ app.post('/api/search', async (req, res) => {
 
           totalCount++;
 
-          // Fetch full post to extract contact info
+          // Fetch full post to extract contact info (with retry)
           sendEvent('log', { level: 'info', message: `🔍 Fetching full post: ${listing.title.substring(0, 50)}...` });
           let contacts = {};
-          try {
-            const postHtml = await scrapeWithBrightData(listing.url);
-            if (postHtml) {
-              const { body } = parseCraigslistPost(postHtml);
-              if (body) {
-                sendEvent('log', { level: 'ai', message: `🤖 AI extracting contacts from post...` });
-                contacts = await extractContactsWithAI(body, listing.title);
-                sendEvent('log', { level: 'ai', message: `🧠 AI: Email="${contacts.email || 'N/A'}", Phone="${contacts.phone || 'N/A'}"` });
+          let postFetched = false;
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              const postHtml = await scrapeWithBrightData(listing.url);
+              if (postHtml) {
+                const { body } = parseCraigslistPost(postHtml);
+                if (body && body.length > 20) {
+                  sendEvent('log', { level: 'ai', message: `🤖 AI extracting contacts...` });
+                  contacts = await extractContactsWithAI(body, listing.title);
+                  sendEvent('log', { level: 'ai', message: `🧠 AI: Email="${contacts.email || 'N/A'}", Phone="${contacts.phone || 'N/A'}"` });
+                  postFetched = true;
+                  break;
+                }
               }
+            } catch (fetchErr) {
+              sendEvent('log', { level: 'warning', message: `⚠️ Post fetch attempt ${attempt} failed: ${fetchErr.message}` });
+              if (attempt < 2) await new Promise(r => setTimeout(r, 2000));
             }
-          } catch (fetchErr) {
-            sendEvent('log', { level: 'warning', message: `⚠️ Couldn't fetch post: ${fetchErr.message}` });
+          }
+          if (!postFetched) {
+            sendEvent('log', { level: 'warning', message: `⚠️ Skipping post (fetch failed): ${listing.title.substring(0, 40)}` });
+            totalCount--;
+            continue;
           }
 
           // Budget filter
@@ -1223,11 +1248,13 @@ app.post('/api/search', async (req, res) => {
           await new Promise(r => setTimeout(r, 500));
         }
 
-        sendEvent('log', { level: 'info', message: `📊 ${city}: ${listings.length} listings added to DB` });
+        sendEvent('log', { level: 'info', message: `📊 ${city}: ${listings.length} listings processed` });
 
       } catch (error) {
         sendEvent('log', { level: 'error', message: `❌ ${city}: ${error.message}` });
       }
+      // Small delay between cities to avoid connection exhaustion
+      await new Promise(r => setTimeout(r, 1000));
     }
   }
 
