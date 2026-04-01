@@ -1416,128 +1416,53 @@ app.post('/api/search', async (req, res) => {
         }
       }
 
+      const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
+
       // ========== UPWORK ==========
       if ((sourceFilter === 'all' || sourceFilter === 'upwork') && verifiedCount < targetLeads) {
         saveLog(jobId, 'info', `🔍 Searching Upwork...`);
-        // Wrapper so scraper functions can log to DB
-        const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
-        const upworkPosts = await scrapeUpwork(keyword, dateFrom, dateTo, logFn);
-        await processLeadPosts(upworkPosts, 'upwork');
+        try {
+          const upworkPosts = await scrapeUpwork(keyword, dateFrom, dateTo, logFn);
+          await processLeadPosts(upworkPosts, 'upwork');
+        } catch(e) { saveLog(jobId, 'warning', `⚠️ Upwork failed: ${e.message}`); }
       }
 
       // ========== FIVERR ==========
       if ((sourceFilter === 'all' || sourceFilter === 'fiverr') && verifiedCount < targetLeads) {
-        saveLog(jobId, 'info', `🔍 Searching Fiverr buyer requests...`);
-        const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
-        const fiverrPosts = await scrapeFiverr(keyword, logFn);
-        await processLeadPosts(fiverrPosts, 'fiverr');
+        saveLog(jobId, 'info', `🔍 Searching Fiverr...`);
+        try {
+          const fiverrPosts = await scrapeFiverr(keyword, logFn);
+          await processLeadPosts(fiverrPosts, 'fiverr');
+        } catch(e) { saveLog(jobId, 'warning', `⚠️ Fiverr failed: ${e.message}`); }
       }
 
       // ========== TWITTER/X ==========
       if ((sourceFilter === 'all' || sourceFilter === 'twitter') && verifiedCount < targetLeads) {
         saveLog(jobId, 'info', `🔍 Searching Twitter/X...`);
-        const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
-        const twitterPosts = await scrapeTwitter(keyword, dateFrom, dateTo, logFn);
-        await processLeadPosts(twitterPosts, 'twitter');
+        try {
+          const twitterPosts = await scrapeTwitter(keyword, dateFrom, dateTo, logFn);
+          await processLeadPosts(twitterPosts, 'twitter');
+        } catch(e) { saveLog(jobId, 'warning', `⚠️ Twitter failed: ${e.message}`); }
       }
 
       // ========== FACEBOOK ==========
       if ((sourceFilter === 'all' || sourceFilter === 'facebook') && verifiedCount < targetLeads) {
-        saveLog(jobId, 'info', `🔍 Searching Facebook Groups...`);
-        const logFn = (type, data) => { if (type === 'log') saveLog(jobId, data.level||'info', data.message||''); };
-        const fbPosts = await scrapeFacebookGroups(keyword, logFn);
-        await processLeadPosts(fbPosts, 'facebook');
+        saveLog(jobId, 'info', `🔍 Searching Facebook...`);
+        try {
+          const fbPosts = await scrapeFacebookGroups(keyword, logFn);
+          await processLeadPosts(fbPosts, 'facebook');
+        } catch(e) { saveLog(jobId, 'warning', `⚠️ Facebook failed: ${e.message}`); }
       }
 
-      // ========== REDDIT FIRST ==========
-      if (sourceFilter === 'all' || sourceFilter === 'reddit') {
+      // ========== REDDIT ==========
+      if ((sourceFilter === 'all' || sourceFilter === 'reddit') && verifiedCount < targetLeads) {
         saveLog(jobId, 'info', `🔍 Starting Reddit search for "${keyword}"...`);
+        let redditPosts = [];
+        try {
+          redditPosts = await scrapeReddit(keyword, logFn, dateFrom, dateTo);
+        } catch(e) { saveLog(jobId, 'warning', `⚠️ Reddit failed: ${e.message}`); }
 
-        const redditPosts = await scrapeReddit(keyword, sendEvent, dateFrom, dateTo);
-
-        for (const post of redditPosts) {
-          if (verifiedCount >= targetLeads) break;
-
-          // URL dedup — skip entirely if already in DB
-          const urlExists = db.prepare('SELECT id FROM intent_leads WHERE url = ?').get(post.url);
-          if (urlExists) {
-            saveLog(jobId, 'info', `⏭️ SKIP (seen URL): ${post.url.substring(0, 60)}`);
-            continue;
-          }
-
-          saveLog(jobId, 'ai', `🤖 AI: Analyzing "${post.title.substring(0, 50)}..."`);
-
-          const contacts = await extractContactsWithAI(post.body, post.title);
-          saveLog(jobId, 'ai', `🧠 AI Result: Email="${contacts.email || 'N/A'}", Budget="${contacts.budget || 'N/A'}"`);
-
-          if (budgetFilter > 0 && contacts.budget) {
-            const budgetNum = parseInt(contacts.budget.replace(/[^0-9]/g, ''));
-            if (budgetNum > 0 && budgetNum < budgetFilter) {
-              saveLog(jobId, 'reject', `❌ REJECTED: Budget $${budgetNum} < $${budgetFilter}`);
-              continue;
-            }
-          }
-
-          let emailVerified = false;
-          let emailStatus = null;
-          if (contacts.email) {
-            saveLog(jobId, 'hunter', `📧 HUNTER.IO: Verifying ${contacts.email}...`);
-            const verification = await verifyEmail(contacts.email);
-            emailVerified = verification.valid;
-            emailStatus = verification.status;
-            saveLog(jobId, emailVerified ? 'success' : 'warning', `${emailVerified ? '✅' : '⚠️'} HUNTER.IO: ${emailStatus || 'unverified'}`);
-          }
-
-          // Check cross-job email duplicate
-          let isDuplicate = 0;
-          if (contacts.email && emailVerified) {
-            const emailExists = db.prepare('SELECT id FROM intent_leads WHERE email = ? AND job_id != ?').get(contacts.email, jobId);
-            if (emailExists) {
-              isDuplicate = 1;
-              saveLog(jobId, 'warning', `♻️ DUPLICATE email across jobs: ${contacts.email}`);
-            }
-          }
-
-          totalCount++;
-
-          // Save to DB
-          try {
-            db.prepare(
-              `INSERT INTO intent_leads (job_id, name, title, description, email, email_verified, email_status, phone, whatsapp, budget, city, source, url, posted_date, is_duplicate)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-            ).run(
-              jobId,
-              contacts.name || post.author || 'Unknown',
-              post.title,
-              contacts.description || post.title.substring(0, 100),
-              contacts.email || null,
-              emailVerified ? 1 : 0,
-              emailStatus,
-              contacts.phone || null,
-              contacts.whatsapp || null,
-              contacts.budget || null,
-              'Remote',
-              post.source,
-              post.url,
-              post.postedDate,
-              isDuplicate
-            );
-          } catch (dbErr) {
-            saveLog(jobId, 'warning', `⚠️ DB insert skipped (dupe URL): ${post.url.substring(0, 60)}`);
-            continue;
-          }
-
-          db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
-
-          // Only count if verified and non-duplicate
-          if (emailVerified && isDuplicate === 0) {
-            verifiedCount++;
-            db.prepare('UPDATE scrape_jobs SET verified_count = ? WHERE id = ?').run(verifiedCount, jobId);
-            saveLog(jobId, 'success', `✅ VERIFIED LEAD #${verifiedCount}: ${contacts.name || post.author} | ${contacts.email}`);
-          }
-
-          await new Promise(r => setTimeout(r, 500));
-        }
+        await processLeadPosts(redditPosts, 'reddit');
       }
 
       // ========== CRAIGSLIST ==========
