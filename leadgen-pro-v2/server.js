@@ -337,7 +337,13 @@ async function scrapeReddit(keyword, sendEvent, dateFrom, dateTo) {
     { name: 'freelance_forhire', type: 'gig', searchType: 'new' },
     { name: 'hiring', type: 'gig', searchType: 'search' },
     { name: 'DesignJobs', type: 'gig', searchType: 'new' },
-    { name: 'gameDevJobs', type: 'gig', searchType: 'new' }
+    { name: 'gameDevJobs', type: 'gig', searchType: 'new' },
+    // Book publishing specific
+    { name: 'selfpublishing', type: 'gig', searchType: 'search' },
+    { name: 'writing', type: 'gig', searchType: 'search' },
+    { name: 'worldbuilding', type: 'gig', searchType: 'search' },
+    { name: 'HireaWriter', type: 'gig', searchType: 'new' },
+    { name: 'Ghostwriting', type: 'gig', searchType: 'search' },
   ];
 
   for (const sub of subreddits) {
@@ -591,12 +597,16 @@ async function scrapeAmazonBooks(targetLeads, dateFrom, dateTo, sendEvent) {
   return books;
 }
 
-// Find author contact info via Google search — REAL AUTHOR WEBSITE ONLY
-async function findAuthorContact(authorName, bookTitle, sendEvent) {
+// Find author contact info — multi-source: Google, Amazon Author Central, Instagram, Facebook
+async function findAuthorContact(authorName, bookTitle, saveLog) {
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
-  function extractRealAuthorWebsiteFromHtml(html) {
-    // Extract all href URLs, pick first real author website
+  function extractEmails(html) {
+    const raw = html.match(emailRegex) || [];
+    return raw.filter(e => !isBlockedEmail(e));
+  }
+
+  function extractRealWebsites(html) {
     const urlRegex = /href="(https?:\/\/[^"#?]+)"/g;
     let match;
     const candidates = [];
@@ -604,70 +614,127 @@ async function findAuthorContact(authorName, bookTitle, sendEvent) {
       const url = match[1];
       if (isRealAuthorWebsite(url)) candidates.push(url);
     }
-    // Prefer shorter domains (e.g. authorname.com over authorname.com/books/xyz)
     candidates.sort((a, b) => a.length - b.length);
-    return candidates.length > 0 ? candidates[0] : null;
+    return candidates;
   }
 
-  // Try multiple search queries to maximise hit rate
-  const queries = [
-    `"${authorName}" author official website`,
-    `"${authorName}" author email contact`,
-    `"${authorName}" "${bookTitle}" author website`,
-  ];
-
-  for (const query of queries) {
+  async function tryFetchEmail(url, label) {
     try {
-      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=5`;
-      sendEvent('log', { level: 'brightdata', message: `🔍 Google: "${query.substring(0, 60)}"` });
-      const html = await scrapeWithBrightData(searchUrl);
-      if (!html) continue;
-
-      // Extract emails directly from search results page
-      const rawEmails = html.match(emailRegex) || [];
-      const emails = rawEmails.filter(e => !isBlockedEmail(e));
-      const email = emails.length > 0 ? emails[0] : null;
-
-      // Extract real author website
-      const website = extractRealAuthorWebsiteFromHtml(html);
-
-      // If email found directly → done
-      if (email && website) return { email, website };
-
-      // If website found but no email → visit the website
-      if (website) {
-        sendEvent('log', { level: 'info', message: `🌐 Visiting ${website}...` });
-        try {
-          // Try /contact page first, then homepage
-          const pagesToTry = [
-            website.replace(/\/$/, '') + '/contact',
-            website.replace(/\/$/, '') + '/contact-me',
-            website
-          ];
-          for (const pageUrl of pagesToTry) {
-            const siteHtml = await scrapeWithBrightData(pageUrl);
-            if (siteHtml) {
-              const siteEmails = (siteHtml.match(emailRegex) || []).filter(e => !isBlockedEmail(e));
-              if (siteEmails.length > 0) {
-                sendEvent('log', { level: 'success', message: `📧 Email found on ${pageUrl}: ${siteEmails[0]}` });
-                return { email: siteEmails[0], website };
-              }
-            }
-          }
-        } catch (e) { /* ignore */ }
-        // Website found but no email — return website only (will be saved but not counted)
-        if (email) return { email, website };
-        return { email: null, website };
+      const html = await scrapeWithBrightData(url);
+      if (!html) return null;
+      const emails = extractEmails(html);
+      if (emails.length > 0) {
+        saveLog('success', `📧 Found email on ${label}: ${emails[0]}`);
+        return { email: emails[0], html };
       }
-
-      if (email) return { email, website: null };
-
-    } catch (error) {
-      sendEvent('log', { level: 'warning', message: `⚠️ Search error: ${error.message}` });
+      return { email: null, html };
+    } catch (e) {
+      return null;
     }
   }
 
-  return { email: null, website: null };
+  const firstName = authorName.split(' ')[0];
+  const lastName = authorName.split(' ').slice(-1)[0];
+
+  // ── SOURCE 1: Google search (3 queries) ──────────────────────────────
+  const googleQueries = [
+    `"${authorName}" author email`,
+    `"${authorName}" author website contact`,
+    `"${authorName}" "${bookTitle}" author`,
+  ];
+
+  let foundWebsite = null;
+
+  for (const query of googleQueries) {
+    try {
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=10`;
+      saveLog('brightdata', `🔍 Google: "${query.substring(0, 60)}"`);
+      const html = await scrapeWithBrightData(searchUrl);
+      if (!html) continue;
+
+      // Direct email in search results
+      const emails = extractEmails(html);
+      if (emails.length > 0) return { email: emails[0], website: foundWebsite };
+
+      // Find real author websites from search results
+      const websites = extractRealWebsites(html);
+      for (const site of websites.slice(0, 3)) {
+        if (foundWebsite) break;
+        foundWebsite = site;
+        // Try homepage, /contact, /contact-me, /about
+        const pages = [
+          site.replace(/\/$/, '') + '/contact',
+          site.replace(/\/$/, '') + '/contact-me',
+          site.replace(/\/$/, '') + '/about',
+          site,
+        ];
+        for (const pageUrl of pages) {
+          const result = await tryFetchEmail(pageUrl, new URL(site).hostname);
+          if (result?.email) return { email: result.email, website: site };
+        }
+      }
+    } catch (e) { /* continue */ }
+  }
+
+  // ── SOURCE 2: Amazon Author Central page ─────────────────────────────
+  try {
+    const authorSlug = authorName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const amazonAuthorUrl = `https://www.amazon.com/stores/author/${authorSlug}`;
+    saveLog('info', `🔍 Checking Amazon Author Central...`);
+    const result = await tryFetchEmail(amazonAuthorUrl, 'Amazon Author Central');
+    if (result?.email) return { email: result.email, website: foundWebsite };
+
+    // Also try Amazon's search for author page
+    const amzSearchUrl = `https://www.amazon.com/s?k=${encodeURIComponent(authorName)}&i=stripbooks-intl-ship&search-type=ss`;
+    const amzHtml = await scrapeWithBrightData(amzSearchUrl);
+    if (amzHtml) {
+      const emails = extractEmails(amzHtml);
+      if (emails.length > 0) return { email: emails[0], website: foundWebsite };
+    }
+  } catch (e) { /* continue */ }
+
+  // ── SOURCE 3: Instagram bio ───────────────────────────────────────────
+  try {
+    const igUrl = `https://www.instagram.com/${firstName.toLowerCase()}${lastName.toLowerCase()}.author/`;
+    saveLog('info', `🔍 Checking Instagram...`);
+    const result = await tryFetchEmail(igUrl, 'Instagram');
+    if (result?.email) return { email: result.email, website: foundWebsite };
+
+    // Try alternate IG handle patterns
+    const igUrl2 = `https://www.instagram.com/${authorName.toLowerCase().replace(/\s+/g, '_')}_author/`;
+    const result2 = await tryFetchEmail(igUrl2, 'Instagram');
+    if (result2?.email) return { email: result2.email, website: foundWebsite };
+  } catch (e) { /* continue */ }
+
+  // ── SOURCE 4: Hunter.io author name search ────────────────────────────
+  if (foundWebsite) {
+    try {
+      const domain = new URL(foundWebsite).hostname.replace(/^www\./, '');
+      saveLog('hunter', `🔍 Hunter domain search: ${domain}`);
+      const domainEmail = await findEmailByDomain(domain, firstName, lastName);
+      if (domainEmail) return { email: domainEmail, website: foundWebsite };
+    } catch (e) { /* continue */ }
+  }
+
+  // ── SOURCE 5: Reedsy author directory ────────────────────────────────
+  try {
+    const reedyUrl = `https://reedsy.com/discovery/user/${authorName.toLowerCase().replace(/\s+/g, '-')}`;
+    saveLog('info', `🔍 Checking Reedsy...`);
+    const html = await scrapeWithBrightData(reedyUrl);
+    if (html) {
+      const emails = extractEmails(html);
+      if (emails.length > 0) return { email: emails[0], website: foundWebsite };
+      // Also extract their website from Reedsy profile
+      const websiteMatch = html.match(/href="(https?:\/\/(?!reedsy)[^"]+)"/);
+      if (websiteMatch && isRealAuthorWebsite(websiteMatch[1]) && !foundWebsite) {
+        foundWebsite = websiteMatch[1];
+        const result = await tryFetchEmail(foundWebsite, 'author website via Reedsy');
+        if (result?.email) return { email: result.email, website: foundWebsite };
+      }
+    }
+  } catch (e) { /* continue */ }
+
+  return { email: null, website: foundWebsite };
 }
 
 // ============================================================
@@ -934,7 +1001,7 @@ app.post('/api/amazon', async (req, res) => {
             totalCount++;
 
             // Find author contact
-            const { email, website } = await findAuthorContact(author, title, sendEvent);
+            const { email, website } = await findAuthorContact(author, title, (level, msg) => saveLog(jobId, level, msg));
 
             // Verify email
             let emailVerified = false;
