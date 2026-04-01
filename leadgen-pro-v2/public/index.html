@@ -536,6 +536,7 @@
     // ===================== POLLING INFRASTRUCTURE =====================
     let pollInterval = null;
     let lastLogId = 0;
+    let activeJobId = null;
 
     // Map log level to color name
     function levelToColor(level) {
@@ -549,8 +550,10 @@
 
     async function startPolling(jobId, framework) {
       lastLogId = 0;
+      activeJobId = jobId;
       clearInterval(pollInterval);
       pollInterval = setInterval(async () => {
+        if (activeJobId !== jobId) { clearInterval(pollInterval); return; } // guard stale intervals
         try {
           const res = await fetch(`/api/jobs/${jobId}/logs?since=${lastLogId}`);
           const data = await res.json();

@@ -30,7 +30,7 @@ const CRAIGSLIST_CITIES = [
   'denver', 'miami', 'atlanta', 'dallas', 'phoenix', 'portland', 'sandiego',
   'washingtondc', 'philadelphia', 'houston', 'detroit', 'minneapolis', 'tampa',
   'orlando', 'nashville', 'charlotte', 'raleigh', 'saltlakecity', 'lasvegas',
-  'sacramento', 'sanjose', 'stlouis', 'pittsburgh', 'cleveland',
+  'sacramento', 'stlouis', 'pittsburgh', 'cleveland',
   'cincinnati', 'columbus', 'indianapolis', 'milwaukee', 'kansascity', 'memphis',
   'baltimore', 'richmond', 'newjersey', 'brooklyn', 'queens', 'longisland',
   'orangecounty', 'inlandempire', 'ventura', 'santabarbara', 'fresno', 'bakersfield',
