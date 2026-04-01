@@ -11,15 +11,17 @@
     .animate-pulse-fast { animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+    .scrape-form { display: none; }
+    .scrape-form.visible { display: block; }
   </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
   <div class="container mx-auto px-4 py-8 max-w-7xl">
-    
+
     <!-- Header -->
     <div class="text-center mb-8">
       <h1 class="text-4xl font-bold text-blue-400 mb-2">🎯 LeadGen Pro v2</h1>
-      <p class="text-gray-400">Find intent leads - people actively seeking services</p>
+      <p class="text-gray-400">Find intent leads — people actively seeking services</p>
     </div>
 
     <!-- Tab Navigation -->
@@ -37,17 +39,33 @@
     <!-- ===================== TAB 1: INTENT LEADS ===================== -->
     <div id="content-intent" class="tab-content active">
 
-      <!-- Search Form -->
-      <div class="bg-gray-800 rounded-lg p-6 mb-8">
+      <!-- Available Data Section -->
+      <div id="availableData-intent" class="mb-6">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-lg font-bold text-gray-300">📁 Available Data</h3>
+          <button onclick="showScrapeForm('intent')" class="text-sm text-blue-400 hover:text-blue-300">➕ New Scrape</button>
+        </div>
+        <div id="jobsList-intent">
+          <div class="text-gray-500 text-sm">Loading...</div>
+        </div>
+      </div>
+
+      <!-- Search Form (hidden by default if jobs exist) -->
+      <div id="scrapeForm-intent" class="scrape-form bg-gray-800 rounded-lg p-6 mb-8">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-base font-bold text-gray-300">🔍 New Scrape</h3>
+          <button onclick="hideScrapeForm('intent')" id="closeFormBtn-intent" class="text-gray-500 hover:text-gray-300 text-sm hidden">✕ Close</button>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-          
+
           <!-- Keyword -->
           <div class="md:col-span-2">
             <label class="block text-sm text-gray-400 mb-1">Keyword</label>
-            <input type="text" id="keyword" placeholder="book publishing, web developer, logo design..." 
+            <input type="text" id="keyword" placeholder="book publishing, web developer, logo design..."
                    class="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 focus:border-blue-500 focus:outline-none">
           </div>
-          
+
           <!-- Region Multi-Select -->
           <div class="md:col-span-2">
             <div class="flex items-center justify-between mb-1">
@@ -60,11 +78,9 @@
                 <button onclick="toggleRegionPanel()" class="text-yellow-400 hover:text-yellow-300" id="regionToggleBtn">▲ Collapse</button>
               </div>
             </div>
-            <!-- Selected tags display -->
             <div id="regionTags" class="flex flex-wrap gap-1 mb-2 min-h-6">
               <span class="text-xs text-gray-400 italic" id="regionTagsPlaceholder">🌍 All regions selected</span>
             </div>
-            <!-- Collapsible region panel -->
             <div id="regionPanel" class="bg-gray-900 border border-gray-700 rounded p-3 max-h-48 overflow-y-auto">
               <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                 <div class="col-span-2 text-gray-500 font-bold mb-1">🇺🇸 USA</div>
@@ -126,20 +142,21 @@
               </div>
             </div>
           </div>
-          
-          <!-- Time Filter -->
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Posted Within</label>
-            <select id="timeFilter" class="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 focus:border-blue-500 focus:outline-none">
-              <option value="1">Last 24 hours</option>
-              <option value="3">Last 3 days</option>
-              <option value="7" selected>Last 7 days</option>
-              <option value="30">Last 30 days</option>
-            </select>
-          </div>
         </div>
-        
+
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+          <!-- Date From -->
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">From</label>
+            <input type="date" id="dateFrom-intent" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+          </div>
+
+          <!-- Date To -->
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">To</label>
+            <input type="date" id="dateTo-intent" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+          </div>
+
           <!-- Source Filter -->
           <div>
             <label class="block text-sm text-gray-400 mb-1">Source</label>
@@ -149,7 +166,7 @@
               <option value="reddit">Reddit Only</option>
             </select>
           </div>
-          
+
           <!-- Budget Filter -->
           <div>
             <label class="block text-sm text-gray-400 mb-1">Min Budget</label>
@@ -161,28 +178,43 @@
               <option value="5000">$5,000+</option>
             </select>
           </div>
-          
-          <!-- Max Results -->
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Max Results</label>
-            <select id="maxResults" class="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 focus:border-blue-500 focus:outline-none">
-              <option value="10">10 leads</option>
-              <option value="25">25 leads</option>
-              <option value="50" selected>50 leads</option>
-              <option value="100">100 leads</option>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+          <!-- Target Leads -->
+          <div class="md:col-span-2">
+            <label class="block text-sm text-gray-400 mb-1">Target Verified Leads</label>
+            <select id="targetLeads-intent" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+              <option value="10">10 verified leads</option>
+              <option value="25">25 verified leads</option>
+              <option value="50" selected>50 verified leads</option>
+              <option value="100">100 verified leads</option>
+              <option value="500">500 verified leads</option>
+              <option value="1000">1,000 verified leads</option>
             </select>
           </div>
-          
+
           <!-- Search Button -->
-          <div class="flex items-end">
-            <button id="searchBtn" onclick="startSearch()" 
+          <div class="md:col-span-2 flex items-end">
+            <button id="searchBtn" onclick="startSearch()"
                     class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition">
               🔍 Search Leads
             </button>
           </div>
         </div>
+
+        <!-- Progress Bar -->
+        <div id="progressBar-intent" class="hidden mt-4">
+          <div class="flex justify-between text-xs text-gray-400 mb-1">
+            <span>✅ Verified Leads</span>
+            <span id="progressText-intent">0 / 50</span>
+          </div>
+          <div class="bg-gray-700 rounded-full h-3">
+            <div id="progressFill-intent" class="bg-green-500 h-3 rounded-full transition-all" style="width: 0%"></div>
+          </div>
+        </div>
       </div>
-      
+
       <!-- AI Console -->
       <div id="statusBar" class="hidden bg-gray-800 rounded-lg p-4 mb-4">
         <div class="flex items-center justify-between mb-3">
@@ -209,12 +241,12 @@
             <div id="stat-contacts" class="text-xl font-bold text-green-400">0</div>
           </div>
           <div class="bg-gray-700 rounded p-2">
-            <div class="text-gray-400">Emails Verified</div>
+            <div class="text-gray-400">Verified (New)</div>
             <div id="stat-verified" class="text-xl font-bold text-purple-400">0</div>
           </div>
         </div>
       </div>
-      
+
       <!-- Contact Type Filters -->
       <div id="filterBar" class="hidden bg-gray-800 rounded-lg p-4 mb-4">
         <div class="flex flex-wrap gap-3 items-center">
@@ -223,7 +255,7 @@
             All (<span id="count-all">0</span>)
           </button>
           <button onclick="filterLeads('email')" class="filter-btn px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-sm" data-filter="email">
-            📧 Email (<span id="count-email">0</span>)
+            📧 Verified Email (<span id="count-email">0</span>)
           </button>
           <button onclick="filterLeads('phone')" class="filter-btn px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-sm" data-filter="phone">
             📞 Phone (<span id="count-phone">0</span>)
@@ -231,7 +263,6 @@
           <button onclick="filterLeads('whatsapp')" class="filter-btn px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-sm" data-filter="whatsapp">
             💬 WhatsApp (<span id="count-whatsapp">0</span>)
           </button>
-          
           <div class="ml-auto">
             <button onclick="exportLeads()" class="px-4 py-1 rounded bg-green-600 hover:bg-green-700 text-sm">
               📥 Export CSV
@@ -239,7 +270,7 @@
           </div>
         </div>
       </div>
-      
+
       <!-- Results Table -->
       <div class="bg-gray-800 rounded-lg overflow-hidden">
         <table class="w-full">
@@ -257,7 +288,7 @@
           <tbody id="resultsTable">
             <tr>
               <td colspan="7" class="px-4 py-8 text-center text-gray-500">
-                Enter a keyword and click Search to find leads
+                Select a job above or start a new scrape
               </td>
             </tr>
           </tbody>
@@ -269,34 +300,48 @@
     <!-- ===================== TAB 2: AMAZON AUTHORS ===================== -->
     <div id="content-amazon" class="tab-content">
 
-      <!-- Amazon Controls -->
-      <div class="bg-gray-800 rounded-lg p-6 mb-8">
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <!-- Available Data Section -->
+      <div id="availableData-amazon" class="mb-6">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-lg font-bold text-gray-300">📁 Available Data</h3>
+          <button onclick="showScrapeForm('amazon')" class="text-sm text-blue-400 hover:text-blue-300">➕ New Scrape</button>
+        </div>
+        <div id="jobsList-amazon">
+          <div class="text-gray-500 text-sm">Loading...</div>
+        </div>
+      </div>
 
-          <!-- Max Books -->
+      <!-- Amazon Scrape Form (hidden by default if jobs exist) -->
+      <div id="scrapeForm-amazon" class="scrape-form bg-gray-800 rounded-lg p-6 mb-8">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-base font-bold text-gray-300">🔍 New Scrape</h3>
+          <button onclick="hideScrapeForm('amazon')" id="closeFormBtn-amazon" class="text-gray-500 hover:text-gray-300 text-sm hidden">✕ Close</button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <!-- Date Range -->
           <div>
-            <label class="block text-sm text-gray-400 mb-1">Max Books</label>
-            <select id="maxBooks" class="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 focus:border-blue-500 focus:outline-none">
-              <option value="10">10 books</option>
-              <option value="25" selected>25 books</option>
-              <option value="50">50 books</option>
-              <option value="100">100 books</option>
+            <label class="block text-xs text-gray-400 mb-1">From</label>
+            <input type="date" id="dateFrom-amazon" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">To</label>
+            <input type="date" id="dateTo-amazon" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <!-- Target Leads -->
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Target Verified Leads</label>
+            <select id="targetLeads-amazon" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm">
+              <option value="100">100 verified leads</option>
+              <option value="500">500 verified leads</option>
+              <option value="1000" selected>1,000 verified leads</option>
+              <option value="5000">5,000 verified leads</option>
+              <option value="10000">10,000 verified leads</option>
             </select>
           </div>
-
-          <!-- Date Filter -->
-          <div>
-            <label class="block text-sm text-gray-400 mb-1">Publication Date</label>
-            <select id="dateFilter" class="w-full bg-gray-700 border border-gray-600 rounded px-4 py-2 focus:border-blue-500 focus:outline-none">
-              <option value="today">Published Today</option>
-              <option value="7days" selected>Last 7 days</option>
-              <option value="30days">Last 30 days</option>
-              <option value="90days">Last 90 days</option>
-            </select>
-          </div>
-
-          <!-- Spacer -->
-          <div></div>
 
           <!-- Find Authors Button -->
           <div class="flex items-end">
@@ -305,7 +350,17 @@
               🚀 Find Authors
             </button>
           </div>
+        </div>
 
+        <!-- Progress Bar -->
+        <div id="progressBar-amazon" class="hidden mt-3">
+          <div class="flex justify-between text-xs text-gray-400 mb-1">
+            <span>✅ Verified Leads (new email + real website)</span>
+            <span id="progressText-amazon">0 / 1000</span>
+          </div>
+          <div class="bg-gray-700 rounded-full h-3">
+            <div id="progressFill-amazon" class="bg-green-500 h-3 rounded-full transition-all" style="width: 0%"></div>
+          </div>
         </div>
       </div>
 
@@ -323,15 +378,15 @@
         </div>
         <div class="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
           <div class="bg-gray-700 rounded p-2">
-            <div class="text-gray-400">Books Found</div>
+            <div class="text-gray-400">Books Processed</div>
             <div id="amazon-stat-books" class="text-xl font-bold text-blue-400">0</div>
           </div>
           <div class="bg-gray-700 rounded p-2">
-            <div class="text-gray-400">Emails Found</div>
+            <div class="text-gray-400">Verified (New)</div>
             <div id="amazon-stat-emails" class="text-xl font-bold text-green-400">0</div>
           </div>
           <div class="bg-gray-700 rounded p-2">
-            <div class="text-gray-400">Websites Found</div>
+            <div class="text-gray-400">Real Websites</div>
             <div id="amazon-stat-websites" class="text-xl font-bold text-yellow-400">0</div>
           </div>
         </div>
@@ -341,8 +396,8 @@
       <div id="amazonExportBar" class="hidden bg-gray-800 rounded-lg p-4 mb-4">
         <div class="flex items-center justify-between">
           <span class="text-gray-300 text-sm">
-            <span id="amazon-count-total">0</span> authors found |
-            <span class="text-green-400"><span id="amazon-count-email">0</span> with email</span>
+            <span class="text-green-400 font-bold"><span id="amazon-count-email">0</span> verified leads</span>
+            <span class="text-gray-500 ml-2">(<span id="amazon-count-total">0</span> total processed)</span>
           </span>
           <button onclick="exportAmazonLeads()" class="px-4 py-1 rounded bg-green-600 hover:bg-green-700 text-sm">
             📥 Export to CSV
@@ -367,7 +422,7 @@
           <tbody id="amazonResultsTable">
             <tr>
               <td colspan="7" class="px-4 py-8 text-center text-gray-500">
-                Select filters and click "🚀 Find Authors" to start
+                Select a job above or start a new scrape
               </td>
             </tr>
           </tbody>
@@ -375,9 +430,9 @@
       </div>
 
     </div><!-- end #content-amazon -->
-    
+
   </div>
-  
+
   <script>
     // ===================== TAB SWITCHING =====================
     function switchTab(tab) {
@@ -392,10 +447,65 @@
       activeBtn.classList.add('bg-blue-600', 'text-white', 'border-blue-400');
     }
 
+    // ===================== JOBS LIST =====================
+    async function loadJobs(framework) {
+      const res = await fetch('/api/jobs');
+      const jobs = await res.json();
+      const filtered = jobs.filter(j => j.framework === framework);
+      const container = document.getElementById(`jobsList-${framework}`);
+
+      if (filtered.length === 0) {
+        container.innerHTML = '<div class="text-gray-500 text-sm">No previous scrapes.</div>';
+        showScrapeForm(framework);
+        return;
+      }
+
+      container.innerHTML = filtered.map(job => `
+        <div class="bg-gray-700 rounded-lg p-3 mb-2 flex items-center justify-between">
+          <div>
+            <span class="text-sm font-medium text-white">${job.date_from} → ${job.date_to}</span>
+            ${job.keyword ? `<span class="text-xs text-gray-400 ml-2">"${escapeHtml(job.keyword)}"</span>` : ''}
+            <div class="text-xs text-gray-400 mt-0.5">
+              ✅ ${job.verified_count} verified leads ·
+              📊 ${job.total_count} total ·
+              <span class="${job.status === 'complete' ? 'text-green-400' : 'text-yellow-400'}">${job.status}</span>
+            </div>
+          </div>
+          <a href="/api/export/${job.id}?framework=${framework}&verifiedOnly=true"
+             class="px-3 py-1 bg-green-600 hover:bg-green-700 text-sm rounded text-white whitespace-nowrap">
+            📥 Download
+          </a>
+        </div>
+      `).join('');
+    }
+
+    function showScrapeForm(framework) {
+      document.getElementById(`scrapeForm-${framework}`).classList.add('visible');
+      const closeBtn = document.getElementById(`closeFormBtn-${framework}`);
+      if (closeBtn) closeBtn.classList.remove('hidden');
+    }
+
+    function hideScrapeForm(framework) {
+      document.getElementById(`scrapeForm-${framework}`).classList.remove('visible');
+    }
+
+    // ===================== DATE DEFAULTS =====================
+    function setDefaultDates() {
+      const today = new Date().toISOString().split('T')[0];
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+      ['intent', 'amazon'].forEach(f => {
+        const fromEl = document.getElementById(`dateFrom-${f}`);
+        const toEl = document.getElementById(`dateTo-${f}`);
+        if (fromEl) fromEl.value = weekAgo;
+        if (toEl) toEl.value = today;
+      });
+    }
+
     // ===================== INTENT LEADS (Tab 1) =====================
     let allLeads = [];
     let currentFilter = 'all';
     let stats = { cities: 0, posts: 0, contacts: 0, verified: 0 };
+    let currentIntentTarget = 50;
 
     function toggleRegionPanel() {
       const panel = document.getElementById('regionPanel');
@@ -418,7 +528,6 @@
       const checked = [...document.querySelectorAll('.region-cb:checked')];
       const total = document.querySelectorAll('.region-cb').length;
       const tagsDiv = document.getElementById('regionTags');
-      const placeholder = document.getElementById('regionTagsPlaceholder');
 
       if (checked.length === 0) {
         tagsDiv.innerHTML = '<span class="text-xs text-red-400 italic">No regions selected</span>';
@@ -428,7 +537,7 @@
         tagsDiv.innerHTML = '<span class="text-xs text-gray-400 italic">🌍 All regions selected</span>';
         return;
       }
-      tagsDiv.innerHTML = checked.map(cb => 
+      tagsDiv.innerHTML = checked.map(cb =>
         `<span class="text-xs bg-blue-800 text-blue-200 px-2 py-0.5 rounded cursor-pointer" onclick="toggleRegion('${cb.value}')">${cb.parentElement.textContent.trim()} ✕</span>`
       ).join('');
     }
@@ -438,26 +547,26 @@
       if (cb) { cb.checked = false; updateRegionTags(); }
     }
 
-    // Update tags whenever a checkbox changes
     document.addEventListener('change', e => {
       if (e.target.classList.contains('region-cb')) updateRegionTags();
     });
-    
+
     async function startSearch() {
       const keyword = document.getElementById('keyword').value.trim();
-      if (!keyword) {
-        alert('Please enter a keyword');
-        return;
-      }
-      
+      const dateFrom = document.getElementById('dateFrom-intent').value;
+      const dateTo = document.getElementById('dateTo-intent').value;
+
+      if (!keyword) { alert('Please enter a keyword'); return; }
+      if (!dateFrom || !dateTo) { alert('Please select a date range'); return; }
+
       const checkedRegions = [...document.querySelectorAll('.region-cb:checked')].map(cb => cb.value);
-      const region = checkedRegions.length === 0 ? 'all' : (checkedRegions.length === document.querySelectorAll('.region-cb').length ? 'all' : checkedRegions.join(','));
-      const timeFilter = parseInt(document.getElementById('timeFilter').value);
+      const region = checkedRegions.length === 0 ? 'all'
+        : (checkedRegions.length === document.querySelectorAll('.region-cb').length ? 'all' : checkedRegions.join(','));
       const sourceFilter = document.getElementById('sourceFilter').value;
       const budgetFilter = parseInt(document.getElementById('budgetFilter').value);
-      const maxResults = parseInt(document.getElementById('maxResults').value);
-      
-      // Reset
+      currentIntentTarget = parseInt(document.getElementById('targetLeads-intent').value);
+
+      // Reset UI
       allLeads = [];
       stats = { cities: 0, posts: 0, contacts: 0, verified: 0 };
       document.getElementById('resultsTable').innerHTML = '';
@@ -466,137 +575,118 @@
       document.getElementById('logContainer').innerHTML = '<div class="text-green-500">🚀 Starting AI-powered lead search...</div>';
       document.getElementById('searchBtn').disabled = true;
       document.getElementById('searchBtn').textContent = '⏳ Searching...';
+
+      // Show & reset progress bar
+      const pBar = document.getElementById('progressBar-intent');
+      pBar.classList.remove('hidden');
+      document.getElementById('progressText-intent').textContent = `0 / ${currentIntentTarget}`;
+      document.getElementById('progressFill-intent').style.width = '0%';
       updateStats();
-      
+
       try {
         const response = await fetch('/api/search', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ keyword, region, timeFilter, sourceFilter, budgetFilter, maxResults })
+          body: JSON.stringify({ keyword, region, dateFrom, dateTo, targetLeads: currentIntentTarget, sourceFilter, budgetFilter })
         });
-        
+
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          
           const text = decoder.decode(value);
-          const lines = text.split('\n');
-          
-          for (const line of lines) {
+          for (const line of text.split('\n')) {
             if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                handleEvent(data);
-              } catch(e) {}
+              try { handleEvent(JSON.parse(line.slice(6))); } catch(e) {}
             }
           }
         }
-        
       } catch (error) {
         console.error('Search error:', error);
-        addLog('Error: ' + error.message);
+        addLog('Error: ' + error.message, 'red');
       }
-      
+
       document.getElementById('searchBtn').disabled = false;
       document.getElementById('searchBtn').textContent = '🔍 Search Leads';
+      loadJobs('intent');
     }
-    
+
     function handleEvent(data) {
       switch (data.type) {
         case 'status':
           document.getElementById('statusText').textContent = data.message;
           break;
-        
-        case 'log':
+
+        case 'log': {
           const levelColors = {
-            brightdata: 'cyan',
-            ai: 'purple',
-            hunter: 'blue',
-            success: 'green',
-            warning: 'yellow',
-            error: 'red',
-            reject: 'red',
-            info: 'white'
+            brightdata: 'cyan', ai: 'purple', hunter: 'blue',
+            success: 'green', warning: 'yellow', error: 'red',
+            reject: 'red', info: 'white'
           };
           addLog(data.message, levelColors[data.level] || 'white');
-          
-          if (data.level === 'brightdata' && data.message.includes('Successfully scraped')) {
-            stats.cities++;
-          }
-          if (data.level === 'ai' && data.message.includes('Analyzing post')) {
-            stats.posts++;
-          }
-          if (data.level === 'hunter' && data.message.includes('VERIFIED')) {
-            stats.verified++;
-          }
+          if (data.level === 'brightdata' && data.message.includes('Successfully scraped')) stats.cities++;
+          if (data.level === 'ai' && data.message.includes('Analyzing')) stats.posts++;
           updateStats();
           break;
-          
+        }
+
         case 'lead':
           allLeads.push(data.lead);
           stats.contacts++;
+          stats.verified = allLeads.filter(l => l.emailVerified).length;
           renderLead(data.lead);
           updateCounts();
           updateStats();
           break;
-          
+
+        case 'progress': {
+          const pct = Math.min(100, Math.round((data.verified / data.target) * 100));
+          document.getElementById('progressText-intent').textContent = `${data.verified} / ${data.target}`;
+          document.getElementById('progressFill-intent').style.width = `${pct}%`;
+          break;
+        }
+
         case 'complete':
           document.getElementById('filterBar').classList.remove('hidden');
           updateCounts();
-          addLog(``, 'green');
           addLog(`═══════════════════════════════════════════`, 'green');
           addLog(`🎉 SEARCH COMPLETE!`, 'green');
-          addLog(`📊 Total Leads: ${data.total}`, 'green');
-          addLog(`📧 With Email: ${data.byType?.email || 0} verified`, 'green');
-          addLog(`📞 With Phone: ${data.byType?.phone || 0}`, 'green');
-          addLog(`💬 With WhatsApp: ${data.byType?.whatsapp || 0}`, 'green');
-          addLog(`🌐 Website Only: ${data.byType?.website || 0}`, 'yellow');
+          addLog(`✅ Verified New Leads: ${data.verified} / ${data.target}`, 'green');
+          addLog(`📊 Total Processed: ${data.total}`, 'white');
           addLog(`═══════════════════════════════════════════`, 'green');
-          
           document.querySelector('#statusBar .animate-spin')?.classList.add('hidden');
           document.getElementById('searchBtn').disabled = false;
           document.getElementById('searchBtn').textContent = '🔍 Search Leads';
           break;
       }
     }
-    
+
     function updateStats() {
       document.getElementById('stat-cities').textContent = stats.cities;
       document.getElementById('stat-posts').textContent = stats.posts;
       document.getElementById('stat-contacts').textContent = stats.contacts;
       document.getElementById('stat-verified').textContent = stats.verified;
     }
-    
+
     function addLog(message, color = 'green') {
       const container = document.getElementById('logContainer');
       const time = new Date().toLocaleTimeString();
       const colors = {
-        green: 'text-green-400',
-        blue: 'text-blue-400',
-        yellow: 'text-yellow-400',
-        cyan: 'text-cyan-400',
-        gray: 'text-gray-500',
-        white: 'text-gray-300',
-        red: 'text-red-400',
-        purple: 'text-purple-400'
+        green: 'text-green-400', blue: 'text-blue-400', yellow: 'text-yellow-400',
+        cyan: 'text-cyan-400', gray: 'text-gray-500', white: 'text-gray-300',
+        red: 'text-red-400', purple: 'text-purple-400'
       };
-      const colorClass = colors[color] || colors.green;
-      container.innerHTML += `<div class="${colorClass}">[${time}] ${message}</div>`;
+      container.innerHTML += `<div class="${colors[color] || 'text-gray-300'}">[${time}] ${message}</div>`;
       container.scrollTop = container.scrollHeight;
     }
-    
+
     function renderLead(lead) {
       const table = document.getElementById('resultsTable');
-      
-      if (table.querySelector('td[colspan]')) {
-        table.innerHTML = '';
-      }
-      
+      if (table.querySelector('td[colspan]')) table.innerHTML = '';
+
       const contactHtml = getContactHtml(lead);
-      
       const row = document.createElement('tr');
       row.className = `border-t border-gray-700 lead-row lead-type-${lead.contactType}`;
       row.innerHTML = `
@@ -607,100 +697,57 @@
         <td class="px-4 py-3 text-sm">${lead.budget ? '$' + lead.budget : '-'}</td>
         <td class="px-4 py-3 text-sm text-gray-400">${lead.city}</td>
         <td class="px-4 py-3 text-sm">
-          <a href="${lead.url}" target="_blank" class="text-blue-400 hover:text-blue-300">🔗 View</a>
+          <a href="${escapeHtml(lead.url)}" target="_blank" class="text-blue-400 hover:text-blue-300">🔗 View</a>
         </td>
       `;
       table.appendChild(row);
     }
-    
+
     function getContactHtml(lead) {
       let html = '';
-      
       if (lead.email) {
-        const verifiedClass = lead.emailVerified ? 'verified' : 'unverified';
-        const icon = lead.emailVerified ? '✅' : '⚠️';
-        html += `<div class="${verifiedClass}">📧 ${icon} ${lead.email}</div>`;
+        const isVerified = lead.emailVerified;
+        html += `<div class="${isVerified ? 'verified' : 'unverified'}">📧 ${isVerified ? '<span class="text-xs bg-green-900 text-green-300 px-1 rounded">✅ Verified</span>' : '⚠️'} ${escapeHtml(lead.email)}</div>`;
       }
-      
-      if (lead.phone) {
-        html += `<div>📞 ${lead.phone}</div>`;
-      }
-      
-      if (lead.whatsapp) {
-        html += `<div>💬 ${lead.whatsapp}</div>`;
-      }
-      
-      if (!html) {
-        html = '<span class="text-gray-500">Website only</span>';
-      }
-      
+      if (lead.phone) html += `<div>📞 ${escapeHtml(lead.phone)}</div>`;
+      if (lead.whatsapp) html += `<div>💬 ${escapeHtml(lead.whatsapp)}</div>`;
+      if (!html) html = '<span class="text-gray-500">Website only</span>';
       return html;
     }
-    
+
     function updateCounts() {
       document.getElementById('count-all').textContent = allLeads.length;
-      document.getElementById('count-email').textContent = allLeads.filter(l => l.contactType === 'email').length;
+      document.getElementById('count-email').textContent = allLeads.filter(l => l.emailVerified).length;
       document.getElementById('count-phone').textContent = allLeads.filter(l => l.contactType === 'phone').length;
       document.getElementById('count-whatsapp').textContent = allLeads.filter(l => l.contactType === 'whatsapp').length;
     }
-    
+
     function filterLeads(type) {
       currentFilter = type;
-      
       document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.classList.remove('bg-blue-600');
         btn.classList.add('bg-gray-700');
       });
       document.querySelector(`[data-filter="${type}"]`).classList.remove('bg-gray-700');
       document.querySelector(`[data-filter="${type}"]`).classList.add('bg-blue-600');
-      
       document.querySelectorAll('.lead-row').forEach(row => {
-        if (type === 'all') {
-          row.style.display = '';
-        } else {
-          row.style.display = row.classList.contains(`lead-type-${type}`) ? '' : 'none';
-        }
+        if (type === 'all') row.style.display = '';
+        else row.style.display = row.classList.contains(`lead-type-${type}`) ? '' : 'none';
       });
     }
-    
+
     function exportLeads() {
-      const filteredLeads = currentFilter === 'all' 
-        ? allLeads 
-        : allLeads.filter(l => l.contactType === currentFilter);
-      
-      if (filteredLeads.length === 0) {
-        alert('No leads to export');
-        return;
-      }
-      
-      const headers = ['Name', 'Email', 'Email Verified', 'Phone', 'WhatsApp', 'Description', 'Budget', 'City', 'Source', 'URL', 'Posted Date'];
-      const rows = filteredLeads.map(l => [
-        l.name,
-        l.email || '',
-        l.emailVerified ? 'Yes' : 'No',
-        l.phone || '',
-        l.whatsapp || '',
-        l.description || l.title,
-        l.budget || '',
-        l.city,
-        l.source,
-        l.url,
-        l.postedDate || ''
-      ]);
-      
-      const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
-      
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `leads_${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
+      const filtered = currentFilter === 'all' ? allLeads : allLeads.filter(l => l.contactType === currentFilter);
+      if (filtered.length === 0) { alert('No leads to export'); return; }
+      const headers = ['Name','Email','Email Verified','Phone','WhatsApp','Description','Budget','City','Source','URL','Posted Date'];
+      const rows = filtered.map(l => [l.name, l.email||'', l.emailVerified?'Yes':'No', l.phone||'', l.whatsapp||'', l.description||l.title, l.budget||'', l.city, l.source, l.url, l.postedDate||'']);
+      downloadCsv([headers, ...rows], `intent_leads_${new Date().toISOString().split('T')[0]}.csv`);
     }
 
     // ===================== AMAZON AUTHORS (Tab 2) =====================
     let amazonLeads = [];
     let amazonStats = { books: 0, emails: 0, websites: 0 };
+    let currentAmazonTarget = 1000;
 
     function addAmazonLog(message, color = 'green') {
       const container = document.getElementById('amazonLogContainer');
@@ -718,8 +765,8 @@
       document.getElementById('amazon-stat-books').textContent = amazonStats.books;
       document.getElementById('amazon-stat-emails').textContent = amazonStats.emails;
       document.getElementById('amazon-stat-websites').textContent = amazonStats.websites;
-      document.getElementById('amazon-count-total').textContent = amazonLeads.length;
-      document.getElementById('amazon-count-email').textContent = amazonLeads.filter(l => l.email).length;
+      document.getElementById('amazon-count-total').textContent = amazonLeads.length + amazonStats.books;
+      document.getElementById('amazon-count-email').textContent = amazonLeads.length;
     }
 
     function renderAmazonLead(lead) {
@@ -734,10 +781,10 @@
         <td class="px-4 py-3 text-sm text-gray-300">${escapeHtml(lead.bookTitle).substring(0, 50)}${lead.bookTitle.length > 50 ? '...' : ''}</td>
         <td class="px-4 py-3 text-sm text-gray-400">${escapeHtml(lead.publishDate || '-')}</td>
         <td class="px-4 py-3 text-sm">
-          ${lead.email ? `<span class="text-green-400">📧 ${escapeHtml(lead.email)}</span>` : '<span class="text-gray-600">—</span>'}
+          ${lead.email ? `<span class="text-green-400">📧 <span class="text-xs bg-green-900 text-green-300 px-1 rounded">✅ Verified</span> ${escapeHtml(lead.email)}</span>` : '<span class="text-gray-600">—</span>'}
         </td>
         <td class="px-4 py-3 text-sm">
-          ${lead.website ? `<a href="${lead.website}" target="_blank" class="text-blue-400 hover:text-blue-300 text-xs">🌐 ${escapeHtml(new URL(lead.website).hostname)}</a>` : '<span class="text-gray-600">—</span>'}
+          ${lead.website ? `<a href="${escapeHtml(lead.website)}" target="_blank" class="text-blue-400 hover:text-blue-300 text-xs">🌐 ${escapeHtml(new URL(lead.website).hostname)}</a>` : '<span class="text-gray-600">—</span>'}
         </td>
         <td class="px-4 py-3 text-sm">
           <a href="${escapeHtml(lead.amazonUrl)}" target="_blank" class="text-orange-400 hover:text-orange-300">📚 View</a>
@@ -747,8 +794,11 @@
     }
 
     async function startAmazonSearch() {
-      const maxBooks = document.getElementById('maxBooks').value;
-      const dateFilter = document.getElementById('dateFilter').value;
+      const dateFrom = document.getElementById('dateFrom-amazon').value;
+      const dateTo = document.getElementById('dateTo-amazon').value;
+      currentAmazonTarget = parseInt(document.getElementById('targetLeads-amazon').value);
+
+      if (!dateFrom || !dateTo) { alert('Please select a date range'); return; }
 
       // Reset
       amazonLeads = [];
@@ -760,13 +810,19 @@
       document.getElementById('amazonBtn').disabled = true;
       document.getElementById('amazonBtn').textContent = '⏳ Searching...';
       document.getElementById('amazonSpinner').classList.remove('hidden');
+
+      // Show & reset progress bar
+      const pBar = document.getElementById('progressBar-amazon');
+      pBar.classList.remove('hidden');
+      document.getElementById('progressText-amazon').textContent = `0 / ${currentAmazonTarget}`;
+      document.getElementById('progressFill-amazon').style.width = '0%';
       updateAmazonStats();
 
       try {
         const response = await fetch('/api/amazon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ maxBooks: parseInt(maxBooks), dateFilter })
+          body: JSON.stringify({ dateFrom, dateTo, targetLeads: currentAmazonTarget })
         });
 
         const reader = response.body.getReader();
@@ -775,20 +831,13 @@
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           const text = decoder.decode(value);
-          const lines = text.split('\n');
-
-          for (const line of lines) {
+          for (const line of text.split('\n')) {
             if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                handleAmazonEvent(data);
-              } catch(e) {}
+              try { handleAmazonEvent(JSON.parse(line.slice(6))); } catch(e) {}
             }
           }
         }
-
       } catch (error) {
         console.error('Amazon search error:', error);
         addAmazonLog('❌ Error: ' + error.message, 'red');
@@ -796,12 +845,13 @@
 
       document.getElementById('amazonBtn').disabled = false;
       document.getElementById('amazonBtn').textContent = '🚀 Find Authors';
+      loadJobs('amazon');
     }
 
     function handleAmazonEvent(data) {
       const levelColors = {
         brightdata: 'cyan', success: 'green', warning: 'yellow',
-        error: 'red', info: 'white'
+        error: 'red', info: 'white', hunter: 'blue'
       };
 
       switch (data.type) {
@@ -813,24 +863,31 @@
           addAmazonLog(data.message, levelColors[data.level] || 'white');
           break;
 
-        case 'amazon_lead':
+        case 'amazon_lead': {
           const lead = data.lead;
           amazonLeads.push(lead);
-          amazonStats.books++;
-          if (lead.email) amazonStats.emails++;
+          amazonStats.emails++;
           if (lead.website) amazonStats.websites++;
           try { renderAmazonLead(lead); } catch(e) {}
           updateAmazonStats();
           document.getElementById('amazonExportBar').classList.remove('hidden');
           break;
+        }
+
+        case 'progress': {
+          const pct = Math.min(100, Math.round((data.verified / data.target) * 100));
+          document.getElementById('progressText-amazon').textContent = `${data.verified} / ${data.target}`;
+          document.getElementById('progressFill-amazon').style.width = `${pct}%`;
+          amazonStats.books = data.verified;
+          updateAmazonStats();
+          break;
+        }
 
         case 'complete':
-          addAmazonLog(``, 'green');
           addAmazonLog(`═══════════════════════════════════════════`, 'green');
           addAmazonLog(`🎉 AMAZON COMPLETE!`, 'green');
-          addAmazonLog(`📚 Total Authors: ${data.total}`, 'green');
-          addAmazonLog(`📧 With Email: ${data.withEmail}`, 'green');
-          addAmazonLog(`🌐 With Website: ${data.withWebsite}`, 'yellow');
+          addAmazonLog(`✅ Verified New Leads: ${data.verified} / ${data.target}`, 'green');
+          addAmazonLog(`📊 Total Processed: ${data.total}`, 'white');
           addAmazonLog(`═══════════════════════════════════════════`, 'green');
           document.getElementById('amazonSpinner').classList.add('hidden');
           document.getElementById('amazonExportBar').classList.remove('hidden');
@@ -839,27 +896,10 @@
     }
 
     function exportAmazonLeads() {
-      if (amazonLeads.length === 0) {
-        alert('No leads to export');
-        return;
-      }
-
-      const headers = ['#', 'Author', 'Book Title', 'Published', 'Email', 'Website', 'Amazon URL', 'Scraped At'];
-      const rows = amazonLeads.map(l => [
-        l.id, l.author, l.bookTitle, l.publishDate || '',
-        l.email || '', l.website || '', l.amazonUrl, l.scrapedAt
-      ]);
-
-      const csv = [headers, ...rows].map(row =>
-        row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
-      ).join('\n');
-
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `amazon_authors_${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
+      if (amazonLeads.length === 0) { alert('No verified leads to export'); return; }
+      const headers = ['#','Author','Book Title','Published','Email','Email Status','Website','Amazon URL','Scraped At'];
+      const rows = amazonLeads.map((l, i) => [i+1, l.author, l.bookTitle, l.publishDate||'', l.email||'', l.emailStatus||'verified', l.website||'', l.amazonUrl, l.scrapedAt]);
+      downloadCsv([headers, ...rows], `amazon_authors_${new Date().toISOString().split('T')[0]}.csv`);
     }
 
     // ===================== SHARED UTILS =====================
@@ -868,6 +908,23 @@
       div.textContent = text || '';
       return div.innerHTML;
     }
+
+    function downloadCsv(rows, filename) {
+      const csv = rows.map(row => row.map(cell => `"${String(cell||'').replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    }
+
+    // ===================== INIT =====================
+    document.addEventListener('DOMContentLoaded', () => {
+      setDefaultDates();
+      loadJobs('intent');
+      loadJobs('amazon');
+    });
   </script>
 </body>
 </html>

@@ -2,55 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const puppeteer = require('puppeteer-core');
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config();
 
-// ============================================================
-// DATA PERSISTENCE HELPERS
-// ============================================================
-const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-const SEEN_LEADS_FILE  = path.join(DATA_DIR, 'seen-leads.json');
-const SEEN_ASINS_FILE  = path.join(DATA_DIR, 'seen-asins.json');
-const RUN_HISTORY_FILE = path.join(DATA_DIR, 'run-history.json');
-
-function readJsonFile(filePath, defaultVal) {
-  try {
-    if (fs.existsSync(filePath)) return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch (e) { console.error(`Failed to read ${filePath}:`, e.message); }
-  return defaultVal;
-}
-
-function writeJsonFile(filePath, data) {
-  try { fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8'); }
-  catch (e) { console.error(`Failed to write ${filePath}:`, e.message); }
-}
-
-// Framework 1 — seen URLs
-function loadSeenLeads()     { return new Set(readJsonFile(SEEN_LEADS_FILE, [])); }
-function saveSeenLeads(set)  { writeJsonFile(SEEN_LEADS_FILE, [...set]); }
-
-// Framework 2 — seen ASINs
-function loadSeenAsins()     { return new Set(readJsonFile(SEEN_ASINS_FILE, [])); }
-function saveSeenAsins(set)  { writeJsonFile(SEEN_ASINS_FILE, [...set]); }
-
-// Run history
-function loadRunHistory()    { return readJsonFile(RUN_HISTORY_FILE, []); }
-function appendRunHistory(entry) {
-  const history = loadRunHistory();
-  history.push(entry);
-  writeJsonFile(RUN_HISTORY_FILE, history);
-}
-
-function getLastAmazonRun() {
-  const history = loadRunHistory();
-  if (!history.length) return null;
-  // Return the most recent entry
-  return history[history.length - 1];
-}
+const db = require('./db');
 
 const app = express();
 app.use(cors());
@@ -90,6 +46,10 @@ const CRAIGSLIST_CITIES = [
   'bangalore', 'delhi', 'mumbai', 'chennai', 'hyderabad', 'pune', 'kolkata'
 ];
 
+// ============================================================
+// SHARED UTILITIES
+// ============================================================
+
 // Scrape URL using Bright Data Web Unlocker (for simple requests like Reddit JSON)
 async function scrapeWithBrightData(url) {
   try {
@@ -112,29 +72,28 @@ async function scrapeWithBrightData(url) {
   }
 }
 
-// Scrape Craigslist using Bright Data Browser API (with JS rendering)
+// Scrape using Bright Data Browser API (with JS rendering)
 async function scrapeWithBrowser(url, waitSelector = null) {
   let browser = null;
   try {
     browser = await puppeteer.connect({
       browserWSEndpoint: BROWSER_WS,
     });
-    
+
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(60000);
-    
+
     await page.goto(url, { waitUntil: 'domcontentloaded' });
-    
-    // Wait for content to load
+
     if (waitSelector) {
       await page.waitForSelector(waitSelector, { timeout: 10000 }).catch(() => {});
     } else {
       await page.waitForTimeout(2000);
     }
-    
+
     const html = await page.content();
     await page.close();
-    
+
     return html;
   } catch (error) {
     console.error('Browser API error:', error.message);
@@ -157,7 +116,7 @@ Post: ${text}
 Return this exact JSON format:
 {
   "name": "person's name or null",
-  "email": "email address or null", 
+  "email": "email address or null",
   "phone": "phone number or null",
   "whatsapp": "whatsapp number or null",
   "budget": "budget mentioned or null",
@@ -194,7 +153,7 @@ async function verifyEmail(email) {
       { timeout: 10000 }
     );
     const status = response.data?.data?.status;
-    return { 
+    return {
       valid: status === 'valid' || status === 'accept_all',
       status: status
     };
@@ -204,31 +163,33 @@ async function verifyEmail(email) {
   }
 }
 
-// Scrape Craigslist using Browser API with response interception
+// ============================================================
+// FRAMEWORK 1: INTENT LEADS (Craigslist + Reddit)
+// ============================================================
+
+// Scrape Craigslist using Bright Data Browser API with response interception
 async function scrapeCraigslistCity(city, keyword, sendEvent) {
   const results = [];
   let browser = null;
-  
+
   try {
     sendEvent('log', { level: 'brightdata', message: `🌐 BROWSER: Connecting to ${city}...` });
-    
+
     browser = await puppeteer.connect({
       browserWSEndpoint: BROWSER_WS,
     });
-    
+
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(45000);
-    
+
     let apiItems = [];
-    
-    // Intercept API responses - capture the one with full item data (has titles)
+
     page.on('response', async (response) => {
       const url = response.url();
       if (url.includes('sapi.craigslist.org') && url.includes('postings/search/full')) {
         try {
           const json = await response.json();
           const items = json?.data?.items || [];
-          // Only use items that have full data (array length >= 10 means has title)
           if (items.length > 0 && Array.isArray(items[0]) && items[0].length >= 10) {
             apiItems = items;
             sendEvent('log', { level: 'info', message: `📦 Captured ${items.length} items from API` });
@@ -238,30 +199,28 @@ async function scrapeCraigslistCity(city, keyword, sendEvent) {
         }
       }
     });
-    
-    const searchUrl = keyword 
+
+    const searchUrl = keyword
       ? `https://${city}.craigslist.org/search/ggg?query=${encodeURIComponent(keyword)}`
       : `https://${city}.craigslist.org/search/ggg`;
-    
+
     sendEvent('log', { level: 'brightdata', message: `🔗 Loading: ${searchUrl}` });
-    
+
     await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 45000 });
-    
-    // Wait for API responses to be processed (they come slightly after page load)
+
     for (let i = 0; i < 10 && apiItems.length === 0; i++) {
       await new Promise(r => setTimeout(r, 500));
     }
-    
+
     sendEvent('log', { level: 'info', message: `📊 Total API items captured: ${apiItems.length}` });
-    
-    // Parse captured API items
+
     for (const item of apiItems) {
       if (Array.isArray(item) && item.length >= 10) {
         const postingId = item[0];
         const title = item[item.length - 1];
         const slugArr = item.find(el => Array.isArray(el) && el[0] === 6);
         const urlSlug = slugArr ? slugArr[1] : 'gig';
-        
+
         if (title && typeof title === 'string' && title.length > 5) {
           results.push({
             url: `https://${city}.craigslist.org/ggg/d/${urlSlug}/${postingId}.html`,
@@ -272,10 +231,10 @@ async function scrapeCraigslistCity(city, keyword, sendEvent) {
         }
       }
     }
-    
+
     sendEvent('log', { level: 'success', message: `✅ ${city}: Found ${results.length} gigs` });
     await page.close();
-    
+
   } catch (error) {
     sendEvent('log', { level: 'error', message: `❌ ${city}: ${error.message}` });
     console.error(`Craigslist ${city} error:`, error.message);
@@ -284,15 +243,14 @@ async function scrapeCraigslistCity(city, keyword, sendEvent) {
       try { await browser.close(); } catch(e) {}
     }
   }
-  
+
   return results;
 }
 
 // Parse individual Craigslist post
 function parseCraigslistPost(html) {
   let body = '';
-  
-  // Extract post body
+
   const bodyMatch = html.match(/<section[^>]*id="postingbody"[^>]*>([\s\S]*?)<\/section>/i);
   if (bodyMatch) {
     body = bodyMatch[1]
@@ -300,24 +258,23 @@ function parseCraigslistPost(html) {
       .replace(/\s+/g, ' ')
       .trim();
   }
-  
-  // Extract posted date
+
   let postedDate = null;
   const dateMatch = html.match(/datetime="([^"]+)"/);
   if (dateMatch) {
     postedDate = dateMatch[1];
   }
-  
+
   return { body, postedDate };
 }
 
 // Determine contact priority
 function getContactPriority(lead) {
-  if (lead.email && lead.emailVerified) return 1; // Email
-  if (lead.phone) return 2; // Phone
-  if (lead.whatsapp) return 3; // WhatsApp
-  if (lead.email && !lead.emailVerified) return 4; // Unverified email
-  return 6; // Website only
+  if (lead.email && lead.emailVerified) return 1;
+  if (lead.phone) return 2;
+  if (lead.whatsapp) return 3;
+  if (lead.email && !lead.emailVerified) return 4;
+  return 6;
 }
 
 function getContactType(priority) {
@@ -330,16 +287,14 @@ function getContactType(priority) {
   }
 }
 
-// Scrape Reddit for freelance GIGS (not job postings)
-async function scrapeReddit(keyword, sendEvent, timeFilterDays = 7) {
+// Scrape Reddit for freelance GIGS
+async function scrapeReddit(keyword, sendEvent, dateFrom, dateTo) {
   const results = [];
-  const axios = require('axios');
-  
-  // Calculate cutoff time
-  const cutoffTime = Date.now() - (timeFilterDays * 24 * 60 * 60 * 1000);
-  sendEvent('log', { level: 'info', message: `⏰ Filtering posts from last ${timeFilterDays} day(s)` });
-  
-  // Subreddits with freelance gigs - expanded list
+
+  const fromTs = new Date(dateFrom).getTime();
+  const toTs = new Date(dateTo).getTime() + 86400000; // inclusive end
+  sendEvent('log', { level: 'info', message: `⏰ Filtering posts from ${dateFrom} to ${dateTo}` });
+
   const subreddits = [
     { name: 'slavelabour', type: 'task', searchType: 'new' },
     { name: 'forhire', type: 'gig', searchType: 'search' },
@@ -349,7 +304,7 @@ async function scrapeReddit(keyword, sendEvent, timeFilterDays = 7) {
     { name: 'DesignJobs', type: 'gig', searchType: 'new' },
     { name: 'gameDevJobs', type: 'gig', searchType: 'new' }
   ];
-  
+
   for (const sub of subreddits) {
     try {
       let url;
@@ -358,34 +313,31 @@ async function scrapeReddit(keyword, sendEvent, timeFilterDays = 7) {
       } else {
         url = `https://www.reddit.com/r/${sub.name}/new.json?limit=100`;
       }
-      
+
       sendEvent('log', { level: 'brightdata', message: `🌐 Fetching r/${sub.name}...` });
-      
+
       const response = await axios.get(url, {
         headers: { 'User-Agent': 'LeadGen/2.0' },
         timeout: 30000
       });
-      
+
       const posts = response.data?.data?.children || [];
       sendEvent('log', { level: 'info', message: `📋 r/${sub.name}: ${posts.length} posts` });
-      
+
       for (const post of posts) {
         const p = post.data;
         const titleLower = p.title?.toLowerCase() || '';
         const flairLower = (p.link_flair_text || '').toLowerCase();
         const bodyLower = (p.selftext || '').toLowerCase();
-        
+
         let isValidGig = false;
-        
-        // Different detection logic per subreddit type
+
         if (sub.type === 'task') {
-          // For r/slavelabour style: [TASK] = client needs work, [OFFER] = freelancer offering
           const isTask = titleLower.includes('[task]') || flairLower.includes('task');
           const isOffer = titleLower.includes('[offer]') || flairLower.includes('offer');
           isValidGig = isTask && !isOffer;
         } else {
-          // For r/forhire style: need more complex filtering
-          const isGig = 
+          const isGig =
             titleLower.includes('need') ||
             titleLower.includes('looking for') ||
             titleLower.includes('want') ||
@@ -395,9 +347,8 @@ async function scrapeReddit(keyword, sendEvent, timeFilterDays = 7) {
             titleLower.includes('budget') ||
             bodyLower.includes('budget') ||
             bodyLower.includes('pay you');
-          
-          // Exclude JOB postings
-          const isJob = 
+
+          const isJob =
             titleLower.includes('position') ||
             titleLower.includes('salary') ||
             titleLower.includes('full-time') ||
@@ -417,29 +368,26 @@ async function scrapeReddit(keyword, sendEvent, timeFilterDays = 7) {
             bodyLower.includes('salary') ||
             bodyLower.includes('benefits') ||
             bodyLower.includes('/yr');
-          
-          // Exclude [For Hire]
-          const isForHire = 
+
+          const isForHire =
             titleLower.includes('[for hire]') ||
             titleLower.includes('for hire') ||
             flairLower.includes('for hire');
-          
+
           isValidGig = isGig && !isJob && !isForHire;
         }
-        
-        // Must match keyword (skip check if keyword is empty - show all)
-        const matchesKeyword = 
-          !keyword || 
+
+        const matchesKeyword =
+          !keyword ||
           keyword.trim() === '' ||
-          sub.searchType === 'search' || 
+          sub.searchType === 'search' ||
           titleLower.includes(keyword.toLowerCase()) ||
           bodyLower.includes(keyword.toLowerCase());
-        
-        // Check time filter
+
         const postTime = p.created_utc * 1000;
-        const isRecent = postTime >= cutoffTime;
-        
-        if (isValidGig && matchesKeyword && isRecent) {
+        const isInRange = postTime >= fromTs && postTime <= toTs;
+
+        if (isValidGig && matchesKeyword && isInRange) {
           results.push({
             title: p.title,
             body: p.selftext || '',
@@ -455,238 +403,72 @@ async function scrapeReddit(keyword, sendEvent, timeFilterDays = 7) {
       sendEvent('log', { level: 'warning', message: `⚠️ r/${sub.name}: ${error.message}` });
     }
   }
-  
+
   sendEvent('log', { level: 'info', message: `📊 Total Reddit leads found: ${results.length}` });
   return results;
 }
-
-// Main search endpoint
-app.post('/api/search', async (req, res) => {
-  const { keyword, region, timeFilter = 7, sourceFilter = 'all', budgetFilter = 0, maxResults = 50 } = req.body;
-  
-  console.log(`[${new Date().toISOString()}] Search: "${keyword}" in ${region || 'all regions'} | Time: ${timeFilter}d | Source: ${sourceFilter} | Budget: $${budgetFilter}+`);
-  
-  // Set up SSE
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  
-  const sendEvent = (type, data) => {
-    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
-  };
-  
-  const leads = [];
-  let cities;
-  if (!region || region === 'all') {
-    cities = CRAIGSLIST_CITIES.slice(0, 50);
-  } else if (region.includes(',')) {
-    cities = region.split(',').map(r => r.trim()).filter(r => r);
-  } else {
-    cities = [region];
-  }
-
-  // Deduplication — load seen lead URLs
-  const seenLeads = loadSeenLeads();
-  const newLeadUrls = [];
-  sendEvent('log', { level: 'info', message: `🔁 Dedup: ${seenLeads.size} previously seen URLs loaded` });
-  
-  // ========== REDDIT FIRST (faster, more reliable) ==========
-  if (sourceFilter === 'all' || sourceFilter === 'reddit') {
-    sendEvent('log', { level: 'info', message: `🔍 Starting Reddit search for "${keyword}"...` });
-    sendEvent('status', { message: `Searching Reddit...` });
-    
-    const redditPosts = await scrapeReddit(keyword, sendEvent, timeFilter);
-    
-    for (const post of redditPosts) {
-      if (leads.length >= maxResults) break;
-
-      // Dedup check
-      if (seenLeads.has(post.url)) {
-        sendEvent('log', { level: 'info', message: `⏭️ SKIP (seen): ${post.url.substring(0, 60)}` });
-        continue;
-      }
-      
-      sendEvent('log', { level: 'ai', message: `🤖 AI: Analyzing "${post.title.substring(0, 50)}..."` });
-      
-      const contacts = await extractContactsWithAI(post.body, post.title);
-      sendEvent('log', { level: 'ai', message: `🧠 AI Result: Email="${contacts.email || 'N/A'}", Budget="${contacts.budget || 'N/A'}"` });
-      
-      // Check budget filter
-      if (budgetFilter > 0 && contacts.budget) {
-        const budgetNum = parseInt(contacts.budget.replace(/[^0-9]/g, ''));
-        if (budgetNum > 0 && budgetNum < budgetFilter) {
-          sendEvent('log', { level: 'reject', message: `❌ REJECTED: Budget $${budgetNum} < $${budgetFilter}` });
-          continue;
-        }
-      }
-      
-      let emailVerified = false;
-      if (contacts.email) {
-        sendEvent('log', { level: 'hunter', message: `📧 HUNTER.IO: Verifying ${contacts.email}...` });
-        const verification = await verifyEmail(contacts.email);
-        emailVerified = verification.valid;
-        sendEvent('log', { level: emailVerified ? 'success' : 'warning', message: `${emailVerified ? '✅' : '⚠️'} HUNTER.IO: ${emailVerified ? 'VERIFIED' : 'UNVERIFIED'}` });
-      }
-      
-      const lead = {
-        id: leads.length + 1,
-        name: contacts.name || post.author || 'Unknown',
-        title: post.title,
-        description: contacts.description || post.title.substring(0, 100),
-        email: contacts.email || null,
-        emailVerified: emailVerified,
-        phone: contacts.phone || null,
-        whatsapp: contacts.whatsapp || null,
-        budget: contacts.budget || null,
-        city: 'Remote',
-        source: post.source,
-        url: post.url,
-        postedDate: post.postedDate,
-        scrapedAt: new Date().toISOString()
-      };
-      
-      lead.contactPriority = getContactPriority(lead);
-      lead.contactType = getContactType(lead.contactPriority);
-      
-      leads.push(lead);
-      seenLeads.add(post.url);
-      newLeadUrls.push(post.url);
-      sendEvent('log', { level: 'success', message: `✅ LEAD #${lead.id}: ${lead.name} | ${lead.contactType.toUpperCase()}` });
-      sendEvent('lead', { lead });
-      
-      // Small delay to avoid rate limiting
-      await new Promise(r => setTimeout(r, 500));
-    }
-  }
-  
-  // ========== CRAIGSLIST (main source for volume) ==========
-  if ((sourceFilter === 'all' || sourceFilter === 'craigslist') && leads.length < maxResults) {
-    sendEvent('log', { level: 'info', message: `\n📍 Searching Craigslist (${cities.length} cities)...` });
-    sendEvent('status', { message: `Searching Craigslist...` });
-    
-    for (const city of cities) {
-      if (leads.length >= maxResults) break;
-      
-      try {
-        // Scrape city using Browser API
-        const listings = await scrapeCraigslistCity(city, keyword, sendEvent);
-        
-        // Process each listing (limit per city for speed)
-        for (const listing of listings.slice(0, 20)) {
-          if (leads.length >= maxResults) break;
-
-          // Dedup check
-          if (seenLeads.has(listing.url)) {
-            sendEvent('log', { level: 'info', message: `⏭️ SKIP (seen): ${listing.url.substring(0, 60)}` });
-            continue;
-          }
-          
-          // Create lead directly from listing (skip fetching full post for speed)
-          const lead = {
-            id: leads.length + 1,
-            name: 'Craigslist Poster',
-            title: listing.title,
-            description: listing.title,
-            email: null,
-            emailVerified: false,
-            phone: null,
-            whatsapp: null,
-            budget: listing.price || null,
-            city: city,
-            source: 'craigslist',
-            url: listing.url,
-            postedDate: new Date().toISOString(),
-            scrapedAt: new Date().toISOString()
-          };
-          
-          lead.contactPriority = 6;
-          lead.contactType = 'website';
-          
-          leads.push(lead);
-          seenLeads.add(listing.url);
-          newLeadUrls.push(listing.url);
-          sendEvent('lead', { lead });
-        }
-        
-        sendEvent('log', { level: 'info', message: `📊 ${city}: Added ${listings.length} leads (Total: ${leads.length})` });
-        
-      } catch (error) {
-        sendEvent('log', { level: 'error', message: `❌ ${city}: ${error.message}` });
-      }
-    }
-  }
-
-  // Persist new seen URLs
-  if (newLeadUrls.length > 0) {
-    saveSeenLeads(seenLeads);
-    sendEvent('log', { level: 'info', message: `💾 Saved ${newLeadUrls.length} new URLs to dedup store` });
-  }
-  
-  sendEvent('log', { level: 'success', message: `\n🎯 SEARCH COMPLETE! Total leads: ${leads.length}` });
-  sendEvent('complete', { 
-    total: leads.length,
-    byType: {
-      email: leads.filter(l => l.contactType === 'email').length,
-      phone: leads.filter(l => l.contactType === 'phone').length,
-      whatsapp: leads.filter(l => l.contactType === 'whatsapp').length,
-      email_unverified: leads.filter(l => l.contactType === 'email_unverified').length,
-      website: leads.filter(l => l.contactType === 'website').length
-    }
-  });
-  
-  res.end();
-});
-
-// Get available cities
-app.get('/api/cities', (req, res) => {
-  res.json({ cities: CRAIGSLIST_CITIES });
-});
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'ok',
-    apis: {
-      brightdata: !!BRIGHTDATA_API_KEY,
-      hunter: !!HUNTER_API_KEY,
-      gemini: !!GEMINI_API_KEY
-    }
-  });
-});
-
-// Debug endpoint to test Craigslist scraping
-app.get('/api/debug/craigslist', async (req, res) => {
-  const logs = [];
-  const sendEvent = (type, data) => logs.push({ type, ...data });
-  
-  try {
-    const results = await scrapeCraigslistCity('sfbay', '', sendEvent);
-    res.json({ 
-      success: true, 
-      results: results.length,
-      sampleTitles: results.slice(0, 5).map(r => r.title),
-      logs 
-    });
-  } catch (error) {
-    res.json({ success: false, error: error.message, logs });
-  }
-});
 
 // ============================================================
 // FRAMEWORK 2: AMAZON AUTHOR LEAD GEN
 // ============================================================
 
-// Build Amazon search URL based on dateFilter
-function buildAmazonUrl(dateFilter, page = 1) {
+const BLOCKED_DOMAINS = [
+  'google.', 'amazon.', 'goodreads.', 'facebook.', 'twitter.', 'instagram.',
+  'youtube.', 'linkedin.', 'pinterest.', 'reddit.', 'wikipedia.', 'bookbub.',
+  'audible.', 'barnesandnoble.', 'thriftbooks.', 'booksrun.', 'penguinrandomhouse.',
+  'harpercollins.', 'simonandschuster.', 'macmillan.', 'randomhouse.', 'scholastic.',
+  'bloomsbury.', 'hachette.', 'abrams.', 'sourcebooks.', 'tiktok.', 'apple.',
+  'microsoft.', 'cloudflare.', 'medium.', 'substack.', 'wordpress.com', 'blogger.com',
+  'wix.com', 'squarespace.com', 'weebly.com', 'jimdo.com', 'site123.com',
+  'strikingly.com', 'webnode.com', 'tumblr.com', 'myspace.com', 'booksamillion.com',
+  'walmart.com', 'target.com', 'ebay.com', 'etsy.com', 'scribd.com', 'archive.org',
+  'openlibrary.org', 'worldcat.org', 'librarything.com', 'kobo.com', 'smashwords.com',
+  'lulu.com', 'bookbaby.com', 'ingramspark.com', 'wattpad.com', 'royalroad.com',
+  'allauthor.com', 'authorsdb.com', 'fantasticfiction.com', 'publishersweekly.com',
+  'kirkusreviews.com', 'netgalley.com', 'edelweiss.com', 'gstatic.com',
+  'googleapis.com', 'sentry.io', 'aexp.com', 'jstor.org', 'gutenberg.org',
+  'sermoncentral.com', 'bookbeat.com', 'gramercybooksbexley.com', 'awesomebooks.com',
+  'bookmans.com', 'hymnary.org', 'jacket2.org', 'jimruttshow.com',
+  'helpingcouplesheal.com', 'ieee.es', 'alabama.gov', 'bookmanager.com',
+  'nytimes.com', 'theguardian.com', 'huffpost.com', 'buzzfeed.com'
+];
+
+function isRealAuthorWebsite(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+    if (BLOCKED_DOMAINS.some(d => host.includes(d))) return false;
+    if (!/\.[a-z]{2,}$/.test(host)) return false;
+    if (/\/(books|authors|search|catalog|directory|listing|store|shop)\//i.test(url)) return false;
+    return true;
+  } catch { return false; }
+}
+
+function isBlockedEmail(email) {
+  if (email.match(/\.(png|jpg|jpeg|gif|svg|webp|js|css|min\.js|ts)(@|$)/i)) return true;
+  if (/^(user|admin|info|noreply|no-reply|test|example|support|help|contact|sales|hello)@/i.test(email)) return true;
+  if (/\d+\.\d+\.\d+/.test(email)) return true;
+  if (email.split('@')[0].length > 40) return true;
+  if (BLOCKED_DOMAINS.some(d => email.toLowerCase().includes(d))) return true;
+  const domain = email.split('@')[1] || '';
+  if (!domain.includes('.')) return true;
+  return false;
+}
+
+// Build Amazon search URL based on date range
+function buildAmazonUrl(dateFrom, dateTo, page = 1) {
+  // Use date-desc-rank with general new releases; filter locally by publish date
   let base = 'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A283155';
-  if (dateFilter === 'today') {
+  // Map to rough Amazon publication date filters
+  const now = new Date();
+  const fromDate = new Date(dateFrom);
+  const diffDays = Math.ceil((now - fromDate) / (1000 * 60 * 60 * 24));
+  if (diffDays <= 1) {
     base += '%2Cp_n_publication_date%3A1250226011';
-  } else if (dateFilter === '7days') {
+  } else if (diffDays <= 7) {
     base += '%2Cp_n_publication_date%3A1250227011';
-  } else if (dateFilter === '30days') {
+  } else if (diffDays <= 30) {
     base += '%2Cp_n_publication_date%3A1250225011';
   }
-  // 90days has no special filter — use base URL (recent releases)
   if (page > 1) {
     base += `&page=${page}`;
   }
@@ -694,18 +476,20 @@ function buildAmazonUrl(dateFilter, page = 1) {
 }
 
 // Scrape Amazon new releases and return book objects
-async function scrapeAmazonBooks(maxBooks, dateFilter, sendEvent) {
+async function scrapeAmazonBooks(targetLeads, dateFrom, dateTo, sendEvent) {
   const books = [];
   let browser = null;
   let page_num = 1;
+  // We scrape more pages than needed since not all will have verified emails
+  const maxPages = 50;
 
   sendEvent('log', { level: 'brightdata', message: `🌐 BROWSER: Connecting to Amazon...` });
 
   try {
     browser = await puppeteer.connect({ browserWSEndpoint: BROWSER_WS });
 
-    while (books.length < maxBooks) {
-      const url = buildAmazonUrl(dateFilter, page_num);
+    while (page_num <= maxPages) {
+      const url = buildAmazonUrl(dateFrom, dateTo, page_num);
       sendEvent('log', { level: 'info', message: `📄 Scraping page ${page_num}: ${url}` });
 
       const page = await browser.newPage();
@@ -739,19 +523,15 @@ async function scrapeAmazonBooks(maxBooks, dateFilter, sendEvent) {
         }
 
         for (const book of pageBooks) {
-          if (books.length >= maxBooks) break;
           books.push({
             ...book,
             amazonUrl: `https://www.amazon.com/dp/${book.asin}`
           });
         }
 
-        sendEvent('log', { level: 'success', message: `✅ Page ${page_num}: ${pageBooks.length} books (total: ${books.length})` });
+        sendEvent('log', { level: 'success', message: `✅ Page ${page_num}: ${pageBooks.length} books (total buffered: ${books.length})` });
         page_num++;
 
-        if (books.length >= maxBooks) break;
-
-        // Small delay between pages
         await new Promise(r => setTimeout(r, 1500));
 
       } catch (pageError) {
@@ -766,67 +546,26 @@ async function scrapeAmazonBooks(maxBooks, dateFilter, sendEvent) {
     if (browser) await browser.close().catch(() => {});
   }
 
-  return books.slice(0, maxBooks);
+  return books;
 }
 
-// Find author contact info via Google search
+// Find author contact info via Google search — REAL AUTHOR WEBSITE ONLY
 async function findAuthorContact(authorName, bookTitle, sendEvent) {
   const query = `"${authorName}" "${bookTitle}" author`;
   const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=5`;
 
-  const BLOCKED_DOMAINS = ['google.com', 'amazon.com', 'goodreads.com', 'example.com', 'sentry.io',
-    'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com', 'linkedin.com',
-    'pinterest.com', 'tumblr.com', 'reddit.com', 'wikipedia.org', 'gstatic.com',
-    'googleapis.com', 'aexp.com', 'bookbub.com', 'barnesandnoble.com', 'audible.com',
-    'thriftbooks.com', 'booksrun.com', 'jstor.org', 'gutenberg.org', 'sermoncentral.com',
-    'bookbeat.com', 'penguinrandomhouse.com', 'tiktok.com', 'gramercybooksbexley.com',
-    'awesomebooks.com', 'bookmans.com', 'hymnary.org', 'jacket2.org', 'jimruttshow.com',
-    'helpingcouplesheal.com', 'ieee.es', 'alabama.gov', 'bookmanager.com'];
-
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
-  function isBlockedEmail(email) {
-    // Block file extensions masquerading as emails
-    if (email.match(/\.(png|jpg|jpeg|gif|svg|webp|js|css|min\.js|ts)(@|$)/i)) return true;
-    // Block obvious fake/placeholder emails
-    if (/^(user|admin|info|noreply|no-reply|test|example|support|help|contact|sales|hello)@/i.test(email)) return true;
-    // Block emails with version numbers (npm package names)
-    if (/\d+\.\d+\.\d+/.test(email)) return true;
-    // Block very long local parts (likely code artifacts)
-    if (email.split('@')[0].length > 40) return true;
-    // Block blocked domains
-    if (BLOCKED_DOMAINS.some(d => email.toLowerCase().includes(d))) return true;
-    // Block emails that don't look like real personal/business emails
-    const domain = email.split('@')[1] || '';
-    if (!domain.includes('.')) return true;
-    return false;
-  }
-
-  const BLOCKED_WEBSITE_PATTERNS = [
-    'google.', 'gstatic.com', 'googleapis.com', 'amazon.', 'goodreads.com',
-    'facebook.com', 'twitter.com', 'instagram.com', 'youtube.com', 'linkedin.com',
-    'pinterest.com', 'reddit.com', 'wikipedia.org', 'bookbub.com', 'audible.com',
-    'barnesandnoble.com', 'thriftbooks.com', 'booksrun.com', 'jstor.org',
-    'gutenberg.org', 'penguinrandomhouse.com', 'tiktok.com', 'apple.com',
-    'microsoft.com', 'cloudflare.com', 'wp.com', 'blogger.com'
-  ];
-
-  function extractWebsiteFromHtml(html) {
+  function extractRealAuthorWebsiteFromHtml(html) {
     const urlRegex = /href="(https?:\/\/[^"]+)"/g;
     let match;
-    const candidates = [];
     while ((match = urlRegex.exec(html)) !== null) {
-      const url = match[1];
-      try {
-        const host = new URL(url).hostname.toLowerCase();
-        const isBlocked = BLOCKED_WEBSITE_PATTERNS.some(d => host.includes(d));
-        // Prefer personal/author websites — short domain, no subpaths that look like aggregators
-        if (!isBlocked && !url.includes('/search?') && !url.includes('?q=')) {
-          candidates.push(url.split('?')[0]);
-        }
-      } catch (e) { /* skip malformed */ }
+      const url = match[1].split('?')[0];
+      if (isRealAuthorWebsite(url)) {
+        return url;
+      }
     }
-    return candidates.length > 0 ? candidates[0] : null;
+    return null;
   }
 
   try {
@@ -839,10 +578,10 @@ async function findAuthorContact(authorName, bookTitle, sendEvent) {
     const emails = rawEmails.filter(e => !isBlockedEmail(e));
     const email = emails.length > 0 ? emails[0] : null;
 
-    // Extract website
-    let website = extractWebsiteFromHtml(html);
+    // Extract real author website only
+    const website = extractRealAuthorWebsiteFromHtml(html);
 
-    // If no email, try visiting the website
+    // If no email found but we have a real website, try scraping the website
     if (!email && website) {
       sendEvent('log', { level: 'info', message: `🌐 Visiting ${website} to find email...` });
       try {
@@ -863,11 +602,88 @@ async function findAuthorContact(authorName, bookTitle, sendEvent) {
   }
 }
 
-// Amazon Author Lead Gen SSE endpoint
-app.post('/api/amazon', async (req, res) => {
-  const { maxBooks = 25, dateFilter = '7days' } = req.body;
+// ============================================================
+// API ENDPOINTS
+// ============================================================
 
-  console.log(`[${new Date().toISOString()}] Amazon search: maxBooks=${maxBooks}, dateFilter=${dateFilter}`);
+// GET /api/jobs — list all scrape jobs
+app.get('/api/jobs', (req, res) => {
+  const jobs = db.prepare('SELECT * FROM scrape_jobs ORDER BY created_at DESC').all();
+  res.json(jobs);
+});
+
+// GET /api/export/:jobId — CSV export (verified, non-duplicate only)
+app.get('/api/export/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const { framework = 'amazon', verifiedOnly = 'true' } = req.query;
+  const verifiedFilter = verifiedOnly === 'true' ? 'AND email_verified = 1 AND is_duplicate = 0' : '';
+  const job = db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+
+  let leads, headers, rows;
+  if (framework === 'amazon') {
+    leads = db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
+    headers = ['#','Author','Book Title','Published','Email','Email Status','Website','Amazon URL','Scraped At'];
+    rows = leads.map((l,i) => [i+1, l.author, l.book_title, l.publish_date||'', l.email||'', l.email_status||'', l.website||'', l.amazon_url, l.scraped_at]);
+  } else {
+    leads = db.prepare(`SELECT * FROM intent_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
+    headers = ['#','Name','Title','Email','Email Status','Phone','WhatsApp','Budget','City','Source','URL','Posted Date','Scraped At'];
+    rows = leads.map((l,i) => [i+1, l.name||'', l.title||'', l.email||'', l.email_status||'', l.phone||'', l.whatsapp||'', l.budget||'', l.city||'', l.source||'', l.url, l.posted_date||'', l.scraped_at]);
+  }
+
+  const csv = [headers, ...rows].map(row => row.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const filename = `${framework}_leads_${job.date_from}_to_${job.date_to}.csv`;
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csv);
+});
+
+// GET /api/cities
+app.get('/api/cities', (req, res) => {
+  res.json({ cities: CRAIGSLIST_CITIES });
+});
+
+// GET /api/health
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    apis: {
+      brightdata: !!BRIGHTDATA_API_KEY,
+      hunter: !!HUNTER_API_KEY,
+      gemini: !!GEMINI_API_KEY
+    }
+  });
+});
+
+// GET /api/debug/craigslist
+app.get('/api/debug/craigslist', async (req, res) => {
+  const logs = [];
+  const sendEvent = (type, data) => logs.push({ type, ...data });
+
+  try {
+    const results = await scrapeCraigslistCity('sfbay', '', sendEvent);
+    res.json({
+      success: true,
+      results: results.length,
+      sampleTitles: results.slice(0, 5).map(r => r.title),
+      logs
+    });
+  } catch (error) {
+    res.json({ success: false, error: error.message, logs });
+  }
+});
+
+// ============================================================
+// POST /api/amazon — Amazon Author Lead Gen
+// ============================================================
+app.post('/api/amazon', async (req, res) => {
+  const { dateFrom, dateTo, targetLeads = 1000, keyword } = req.body;
+
+  if (!dateFrom || !dateTo) {
+    return res.status(400).json({ error: 'dateFrom and dateTo are required' });
+  }
+
+  console.log(`[${new Date().toISOString()}] Amazon search: dateFrom=${dateFrom}, dateTo=${dateTo}, targetLeads=${targetLeads}`);
 
   // Set up SSE
   res.setHeader('Content-Type', 'text/event-stream');
@@ -878,74 +694,406 @@ app.post('/api/amazon', async (req, res) => {
     res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
   };
 
-  const leads = [];
+  // Create scrape job in DB
+  const jobResult = db.prepare(
+    `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
+     VALUES ('amazon', ?, ?, ?, ?, 'running')`
+  ).run(dateFrom, dateTo, keyword || null, targetLeads);
+  const jobId = jobResult.lastInsertRowid;
 
-  sendEvent('log', { level: 'info', message: `🚀 Starting Amazon Author Lead Gen (${maxBooks} books, filter: ${dateFilter})...` });
-  sendEvent('status', { message: 'Scraping Amazon new releases...' });
+  sendEvent('log', { level: 'info', message: `🚀 Starting Amazon Author Lead Gen (job #${jobId}, target: ${targetLeads} verified leads)...` });
+  sendEvent('status', { message: 'Scraping Amazon new releases...', jobId });
 
-  // Step 1: Scrape Amazon books
-  const books = await scrapeAmazonBooks(parseInt(maxBooks), dateFilter, sendEvent);
-  sendEvent('log', { level: 'success', message: `📚 Found ${books.length} books on Amazon` });
+  let verifiedCount = 0;
+  let totalCount = 0;
 
-  if (books.length === 0) {
-    sendEvent('log', { level: 'warning', message: `⚠️ No books found. Check Amazon URL/filters.` });
-    sendEvent('complete', { total: 0, withEmail: 0, withWebsite: 0 });
-    res.end();
-    return;
-  }
+  // Step 1: Stream Amazon books page by page
+  let browser = null;
+  let page_num = 1;
+  const maxPages = 50;
+  let keepGoing = true;
 
-  // Step 2: For each book, find author contact
-  sendEvent('status', { message: 'Finding author contacts...' });
+  try {
+    browser = await puppeteer.connect({ browserWSEndpoint: BROWSER_WS });
 
-  for (const book of books) {
-    const title = book.title || 'Unknown Title';
-    const author = book.author || 'Unknown Author';
+    while (keepGoing && page_num <= maxPages) {
+      const url = buildAmazonUrl(dateFrom, dateTo, page_num);
+      sendEvent('log', { level: 'info', message: `📄 Scraping Amazon page ${page_num}...` });
 
-    sendEvent('log', { level: 'info', message: `📚 Processing: ${title} by ${author}` });
+      const page = await browser.newPage();
+      page.setDefaultNavigationTimeout(60000);
 
-    const { email, website } = await findAuthorContact(author, title, sendEvent);
+      let pageBooks = [];
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        await page.waitForSelector('[data-component-type="s-search-result"]', { timeout: 15000 }).catch(() => {});
 
-    if (email) {
-      sendEvent('log', { level: 'success', message: `✅ Email found: ${email}` });
-    } else {
-      sendEvent('log', { level: 'warning', message: `⚠️ No email for ${author}` });
+        pageBooks = await page.$$eval('[data-component-type="s-search-result"]', (items) => {
+          return items.map(item => {
+            const asin = item.getAttribute('data-asin') || '';
+            const titleEl = item.querySelector('h2 a span') || item.querySelector('.a-size-medium') || item.querySelector('.a-size-base-plus');
+            const title = titleEl ? titleEl.textContent.trim() : '';
+            const authorEl = item.querySelector('.a-row .a-size-base+ .a-size-base') ||
+                             item.querySelector('[class*="author"] .a-link-normal') ||
+                             item.querySelector('.a-row a.a-link-normal');
+            const author = authorEl ? authorEl.textContent.trim() : '';
+            const dateEl = item.querySelector('.a-color-secondary .a-size-base') ||
+                           item.querySelector('[class*="publication"]');
+            const publishDate = dateEl ? dateEl.textContent.trim() : '';
+            return { asin, title, author, publishDate };
+          }).filter(b => b.asin && b.title);
+        });
+        await page.close();
+      } catch (pageError) {
+        await page.close().catch(() => {});
+        sendEvent('log', { level: 'error', message: `❌ Page ${page_num} error: ${pageError.message}` });
+        break;
+      }
+
+      if (pageBooks.length === 0) {
+        sendEvent('log', { level: 'warning', message: `⚠️ No books on page ${page_num}, stopping.` });
+        break;
+      }
+
+      sendEvent('log', { level: 'success', message: `📚 Page ${page_num}: ${pageBooks.length} books` });
+      page_num++;
+
+      // Step 2: Process each book
+      for (const book of pageBooks) {
+        if (verifiedCount >= targetLeads) { keepGoing = false; break; }
+
+        const title = book.title || 'Unknown Title';
+        const author = book.author || 'Unknown Author';
+        const asin = book.asin;
+        const amazonUrl = `https://www.amazon.com/dp/${asin}`;
+
+        // ASIN dedup — skip entirely if already in DB
+        const asinExists = db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(asin);
+        if (asinExists) {
+          sendEvent('log', { level: 'info', message: `⏭️ SKIP (seen ASIN): ${asin}` });
+          continue;
+        }
+
+        sendEvent('log', { level: 'info', message: `📚 Processing: "${title}" by ${author}` });
+        totalCount++;
+
+        // Find author contact
+        const { email, website } = await findAuthorContact(author, title, sendEvent);
+
+        // Verify email
+        let emailVerified = false;
+        let emailStatus = null;
+        if (email) {
+          sendEvent('log', { level: 'hunter', message: `📧 HUNTER.IO: Verifying ${email}...` });
+          const verification = await verifyEmail(email);
+          emailVerified = verification.valid;
+          emailStatus = verification.status;
+          sendEvent('log', { level: emailVerified ? 'success' : 'warning', message: `${emailVerified ? '✅' : '⚠️'} HUNTER.IO: ${emailStatus || 'unverified'}` });
+        }
+
+        // Website check
+        const hasRealWebsite = website ? isRealAuthorWebsite(website) : false;
+
+        // Check for cross-job email duplicate
+        let isDuplicate = 0;
+        if (email && emailVerified) {
+          const emailExists = db.prepare('SELECT id FROM amazon_leads WHERE email = ? AND job_id != ?').get(email, jobId);
+          if (emailExists) {
+            isDuplicate = 1;
+            sendEvent('log', { level: 'warning', message: `♻️ DUPLICATE email across jobs: ${email} — saving but not counting` });
+          }
+        }
+
+        // Save to DB regardless
+        try {
+          db.prepare(
+            `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, email, email_verified, email_status, website, amazon_url, asin, is_duplicate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).run(jobId, author, title, book.publishDate || null, email || null, emailVerified ? 1 : 0, emailStatus, hasRealWebsite ? website : null, amazonUrl, asin, isDuplicate);
+        } catch (dbErr) {
+          // UNIQUE constraint hit (race condition) — skip
+          sendEvent('log', { level: 'warning', message: `⚠️ DB insert skipped (dupe): ${asin}` });
+          continue;
+        }
+
+        // Only count and emit if ALL 4 checks pass:
+        // 1. Email verified  2. Non-duplicate email  3. Real author website  4. ASIN not seen (already checked)
+        if (emailVerified && isDuplicate === 0 && hasRealWebsite) {
+          verifiedCount++;
+          db.prepare('UPDATE scrape_jobs SET verified_count = ?, total_count = ? WHERE id = ?').run(verifiedCount, totalCount, jobId);
+
+          const lead = {
+            id: totalCount,
+            author,
+            bookTitle: title,
+            publishDate: book.publishDate || '',
+            email,
+            emailVerified: true,
+            emailStatus,
+            website,
+            amazonUrl,
+            asin,
+            scrapedAt: new Date().toISOString()
+          };
+
+          sendEvent('amazon_lead', { lead });
+          sendEvent('progress', { verified: verifiedCount, target: targetLeads });
+          sendEvent('log', { level: 'success', message: `✅ VERIFIED LEAD #${verifiedCount}: ${author} | ${email}` });
+        } else {
+          db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
+          const reason = !emailVerified ? 'no verified email' : isDuplicate ? 'duplicate email' : 'no real author website';
+          sendEvent('log', { level: 'info', message: `📝 Saved to DB (not counted — ${reason}): ${author}` });
+        }
+
+        await new Promise(r => setTimeout(r, 1000));
+      }
+
+      await new Promise(r => setTimeout(r, 1500));
     }
-
-    const lead = {
-      id: leads.length + 1,
-      author,
-      bookTitle: title,
-      publishDate: book.publishDate || '',
-      email: email || null,
-      website: website || null,
-      amazonUrl: book.amazonUrl,
-      scrapedAt: new Date().toISOString()
-    };
-
-    leads.push(lead);
-    sendEvent('amazon_lead', { lead });
-
-    // Rate limiting delay
-    await new Promise(r => setTimeout(r, 1000));
+  } catch (error) {
+    sendEvent('log', { level: 'error', message: `❌ Fatal error: ${error.message}` });
+    console.error('Amazon endpoint error:', error);
+  } finally {
+    if (browser) await browser.close().catch(() => {});
   }
 
-  const withEmail = leads.filter(l => l.email).length;
-  const withWebsite = leads.filter(l => l.website).length;
+  // Mark job complete
+  db.prepare(
+    `UPDATE scrape_jobs SET status = 'complete', verified_count = ?, total_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(verifiedCount, totalCount, jobId);
 
-  sendEvent('log', { level: 'success', message: `\n🎯 AMAZON COMPLETE! ${leads.length} authors processed` });
-  sendEvent('log', { level: 'success', message: `📧 With Email: ${withEmail} | 🌐 With Website: ${withWebsite}` });
-  sendEvent('complete', { total: leads.length, withEmail, withWebsite });
+  sendEvent('log', { level: 'success', message: `\n🎯 AMAZON COMPLETE! Verified: ${verifiedCount} / ${targetLeads} | Total processed: ${totalCount}` });
+  sendEvent('complete', { jobId, verified: verifiedCount, total: totalCount, target: targetLeads });
 
   res.end();
 });
 
 // ============================================================
-// END FRAMEWORK 2
+// POST /api/search — Intent Leads (Craigslist + Reddit)
 // ============================================================
+app.post('/api/search', async (req, res) => {
+  const { keyword, region, dateFrom, dateTo, targetLeads = 50, sourceFilter = 'all', budgetFilter = 0 } = req.body;
 
+  if (!dateFrom || !dateTo) {
+    return res.status(400).json({ error: 'dateFrom and dateTo are required' });
+  }
+
+  console.log(`[${new Date().toISOString()}] Search: "${keyword}" | ${dateFrom} → ${dateTo} | target: ${targetLeads}`);
+
+  // Set up SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const sendEvent = (type, data) => {
+    res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
+  };
+
+  // Create scrape job
+  const jobResult = db.prepare(
+    `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
+     VALUES ('intent', ?, ?, ?, ?, 'running')`
+  ).run(dateFrom, dateTo, keyword || null, targetLeads);
+  const jobId = jobResult.lastInsertRowid;
+
+  sendEvent('status', { message: 'Starting search...', jobId });
+
+  let verifiedCount = 0;
+  let totalCount = 0;
+
+  let cities;
+  if (!region || region === 'all') {
+    cities = CRAIGSLIST_CITIES.slice(0, 50);
+  } else if (region.includes(',')) {
+    cities = region.split(',').map(r => r.trim()).filter(r => r);
+  } else {
+    cities = [region];
+  }
+
+  // ========== REDDIT FIRST ==========
+  if (sourceFilter === 'all' || sourceFilter === 'reddit') {
+    sendEvent('log', { level: 'info', message: `🔍 Starting Reddit search for "${keyword}"...` });
+    sendEvent('status', { message: `Searching Reddit...` });
+
+    const redditPosts = await scrapeReddit(keyword, sendEvent, dateFrom, dateTo);
+
+    for (const post of redditPosts) {
+      if (verifiedCount >= targetLeads) break;
+
+      // URL dedup — skip entirely if already in DB
+      const urlExists = db.prepare('SELECT id FROM intent_leads WHERE url = ?').get(post.url);
+      if (urlExists) {
+        sendEvent('log', { level: 'info', message: `⏭️ SKIP (seen URL): ${post.url.substring(0, 60)}` });
+        continue;
+      }
+
+      sendEvent('log', { level: 'ai', message: `🤖 AI: Analyzing "${post.title.substring(0, 50)}..."` });
+
+      const contacts = await extractContactsWithAI(post.body, post.title);
+      sendEvent('log', { level: 'ai', message: `🧠 AI Result: Email="${contacts.email || 'N/A'}", Budget="${contacts.budget || 'N/A'}"` });
+
+      if (budgetFilter > 0 && contacts.budget) {
+        const budgetNum = parseInt(contacts.budget.replace(/[^0-9]/g, ''));
+        if (budgetNum > 0 && budgetNum < budgetFilter) {
+          sendEvent('log', { level: 'reject', message: `❌ REJECTED: Budget $${budgetNum} < $${budgetFilter}` });
+          continue;
+        }
+      }
+
+      let emailVerified = false;
+      let emailStatus = null;
+      if (contacts.email) {
+        sendEvent('log', { level: 'hunter', message: `📧 HUNTER.IO: Verifying ${contacts.email}...` });
+        const verification = await verifyEmail(contacts.email);
+        emailVerified = verification.valid;
+        emailStatus = verification.status;
+        sendEvent('log', { level: emailVerified ? 'success' : 'warning', message: `${emailVerified ? '✅' : '⚠️'} HUNTER.IO: ${emailStatus || 'unverified'}` });
+      }
+
+      // Check cross-job email duplicate
+      let isDuplicate = 0;
+      if (contacts.email && emailVerified) {
+        const emailExists = db.prepare('SELECT id FROM intent_leads WHERE email = ? AND job_id != ?').get(contacts.email, jobId);
+        if (emailExists) {
+          isDuplicate = 1;
+          sendEvent('log', { level: 'warning', message: `♻️ DUPLICATE email across jobs: ${contacts.email}` });
+        }
+      }
+
+      totalCount++;
+
+      // Save to DB
+      try {
+        db.prepare(
+          `INSERT INTO intent_leads (job_id, name, title, description, email, email_verified, email_status, phone, whatsapp, budget, city, source, url, posted_date, is_duplicate)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          jobId,
+          contacts.name || post.author || 'Unknown',
+          post.title,
+          contacts.description || post.title.substring(0, 100),
+          contacts.email || null,
+          emailVerified ? 1 : 0,
+          emailStatus,
+          contacts.phone || null,
+          contacts.whatsapp || null,
+          contacts.budget || null,
+          'Remote',
+          post.source,
+          post.url,
+          post.postedDate,
+          isDuplicate
+        );
+      } catch (dbErr) {
+        sendEvent('log', { level: 'warning', message: `⚠️ DB insert skipped (dupe URL): ${post.url.substring(0, 60)}` });
+        continue;
+      }
+
+      db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
+
+      // Only emit and count if verified and non-duplicate
+      if (emailVerified && isDuplicate === 0) {
+        verifiedCount++;
+        db.prepare('UPDATE scrape_jobs SET verified_count = ? WHERE id = ?').run(verifiedCount, jobId);
+
+        const lead = {
+          id: totalCount,
+          name: contacts.name || post.author || 'Unknown',
+          title: post.title,
+          description: contacts.description || post.title.substring(0, 100),
+          email: contacts.email,
+          emailVerified: true,
+          emailStatus,
+          phone: contacts.phone || null,
+          whatsapp: contacts.whatsapp || null,
+          budget: contacts.budget || null,
+          city: 'Remote',
+          source: post.source,
+          url: post.url,
+          postedDate: post.postedDate,
+          scrapedAt: new Date().toISOString()
+        };
+
+        lead.contactPriority = getContactPriority(lead);
+        lead.contactType = getContactType(lead.contactPriority);
+
+        sendEvent('lead', { lead });
+        sendEvent('progress', { verified: verifiedCount, target: targetLeads });
+        sendEvent('log', { level: 'success', message: `✅ VERIFIED LEAD #${verifiedCount}: ${lead.name} | ${lead.email}` });
+      }
+
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  // ========== CRAIGSLIST ==========
+  if ((sourceFilter === 'all' || sourceFilter === 'craigslist') && verifiedCount < targetLeads) {
+    sendEvent('log', { level: 'info', message: `\n📍 Searching Craigslist (${cities.length} cities)...` });
+    sendEvent('status', { message: `Searching Craigslist...` });
+
+    for (const city of cities) {
+      if (verifiedCount >= targetLeads) break;
+
+      try {
+        const listings = await scrapeCraigslistCity(city, keyword, sendEvent);
+
+        for (const listing of listings.slice(0, 20)) {
+          if (verifiedCount >= targetLeads) break;
+
+          // URL dedup
+          const urlExists = db.prepare('SELECT id FROM intent_leads WHERE url = ?').get(listing.url);
+          if (urlExists) {
+            sendEvent('log', { level: 'info', message: `⏭️ SKIP (seen URL): ${listing.url.substring(0, 60)}` });
+            continue;
+          }
+
+          totalCount++;
+
+          // Craigslist leads have no email — save but don't count toward verified quota
+          try {
+            db.prepare(
+              `INSERT INTO intent_leads (job_id, name, title, description, email, email_verified, phone, whatsapp, budget, city, source, url, posted_date, is_duplicate)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ).run(
+              jobId, 'Craigslist Poster', listing.title, listing.title,
+              null, 0, null, null, listing.price || null,
+              city, 'craigslist', listing.url, new Date().toISOString(), 0
+            );
+          } catch (dbErr) {
+            sendEvent('log', { level: 'warning', message: `⚠️ DB insert skipped (dupe URL)` });
+            continue;
+          }
+
+          db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
+        }
+
+        sendEvent('log', { level: 'info', message: `📊 ${city}: ${listings.length} listings added to DB` });
+
+      } catch (error) {
+        sendEvent('log', { level: 'error', message: `❌ ${city}: ${error.message}` });
+      }
+    }
+  }
+
+  // Mark job complete
+  db.prepare(
+    `UPDATE scrape_jobs SET status = 'complete', verified_count = ?, total_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`
+  ).run(verifiedCount, totalCount, jobId);
+
+  sendEvent('log', { level: 'success', message: `\n🎯 SEARCH COMPLETE! Verified: ${verifiedCount} / ${targetLeads} | Total processed: ${totalCount}` });
+  sendEvent('complete', {
+    jobId,
+    verified: verifiedCount,
+    total: totalCount,
+    target: targetLeads
+  });
+
+  res.end();
+});
+
+// ============================================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 LeadGen Pro v2 running on port ${PORT}`);
   console.log(`🔑 APIs: Bright Data ✅ | Hunter ✅ | Gemini ✅`);
-  console.log(`🔧 Browser WS: ${BROWSER_WS ? 'configured' : 'NOT SET'}`);
 });
