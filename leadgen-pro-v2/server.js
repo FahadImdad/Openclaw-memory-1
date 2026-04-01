@@ -780,32 +780,32 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
     } catch(e) { return { email: null, website: null, html: null }; }
   }
 
-  // ── PHASE 1: Parallel scan — Google, Bing, DuckDuckGo, direct email search,
-  //             Amazon author page, Instagram, Reedsy, Goodreads ─────────
-  saveLog('info', `⚡ Parallel scanning 11 sources for ${authorName}...`);
+  // ── PHASE 1: Parallel scan — 14 sources simultaneously ───────────────
+  saveLog('info', `⚡ Parallel scanning 14 sources for ${authorName}...`);
 
   const encodedName = encodeURIComponent(authorName);
-  const encodedTitle = encodeURIComponent(bookTitle);
 
   const [
     googleR1, googleR2, googleR3, googleDirectEmail,
-    bingR1, bingR2,
-    ddgR,
-    amazonAuthorR,
-    igR, reedsyR, grR
+    bingR1, bingR2, ddgR,
+    amazonBookR, amazonAuthorR,
+    igR, reedsyR, grR,
+    yahooR, pressR
   ] = await Promise.all([
     // Google x3
     fetchEmails(`https://www.google.com/search?q=${encodeURIComponent(`"${authorName}" author email contact`)}&num=10`),
     fetchEmails(`https://www.google.com/search?q=${encodeURIComponent(`"${authorName}" author official website`)}&num=10`),
-    fetchEmails(`https://www.google.com/search?q=${encodeURIComponent(`"${authorName}" "${bookTitle}" author site`)}&num=5`),
-    // Google direct email search — finds publicly posted emails
-    fetchEmails(`https://www.google.com/search?q=${encodeURIComponent(`"${authorName}" author "@gmail.com" OR "@yahoo.com" OR "@hotmail.com" OR "@outlook.com" OR "@icloud.com"`)}&num=10`),
-    // Bing x2 (less aggressive blocking than Google)
-    fetchEmails(`https://www.bing.com/search?q=${encodeURIComponent(`"${authorName}" author email website`)}&count=10`),
-    fetchEmails(`https://www.bing.com/search?q=${encodeURIComponent(`"${authorName}" "${bookTitle}" contact email`)}&count=10`),
-    // DuckDuckGo (most scraper-friendly)
-    fetchEmails(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(`"${authorName}" author email contact site`)}`),
-    // Amazon author page directly
+    fetchEmails(`https://www.google.com/search?q=${encodeURIComponent(`"${authorName}" "${bookTitle}" author`)}&num=10`),
+    // Google direct email — finds publicly posted emails anywhere online
+    fetchEmails(`https://www.google.com/search?q=${encodeURIComponent(`"${authorName}" "@gmail.com" OR "@yahoo.com" OR "@hotmail.com" OR "@outlook.com"`)}&num=10`),
+    // Bing x2
+    fetchEmails(`https://www.bing.com/search?q=${encodeURIComponent(`"${authorName}" author email website contact`)}&count=10`),
+    fetchEmails(`https://www.bing.com/search?q=${encodeURIComponent(`"${authorName}" "${bookTitle}" author email`)}&count=10`),
+    // DuckDuckGo
+    fetchEmails(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(`"${authorName}" author email contact`)}`),
+    // Amazon BOOK page — "About the Author" section has website/bio
+    fetchEmails(`https://www.amazon.com/s?k=${encodeURIComponent(authorName + ' ' + bookTitle)}&i=stripbooks`),
+    // Amazon author stores page
     fetchEmails(`https://www.amazon.com/stores/author/${nameSlug}`),
     // Instagram
     fetchEmails(`https://www.instagram.com/${firstName}${lastName}.author/`),
@@ -813,22 +813,52 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
     fetchEmails(`https://reedsy.com/discovery/user/${nameSlug}`),
     // Goodreads
     fetchEmails(`https://www.goodreads.com/search?q=${encodedName}&search_type=authors`),
+    // Yahoo search
+    fetchEmails(`https://search.yahoo.com/search?p=${encodeURIComponent(`"${authorName}" author email website`)}`),
+    // Search for press kits / media pages
+    fetchEmails(`https://www.google.com/search?q=${encodeURIComponent(`"${authorName}" author "press" OR "media" OR "contact" OR "interview"`)}&num=10`),
   ]);
 
   // Collect any direct emails found across all sources
-  const allResults = [googleR1, googleR2, googleR3, googleDirectEmail, bingR1, bingR2, ddgR, amazonAuthorR, igR, reedsyR];
+  const allResults = [googleR1, googleR2, googleR3, googleDirectEmail, bingR1, bingR2, ddgR, amazonBookR, amazonAuthorR, igR, reedsyR, yahooR, pressR];
   const directEmails = allResults.map(r => r?.email).filter(Boolean);
   if (directEmails.length > 0) {
     saveLog('success', `📧 Direct email found: ${directEmails[0]}`);
     return { email: directEmails[0], website: allResults.find(r=>r?.website)?.website || null };
   }
 
-  // Collect all websites found across all sources
+  // Collect all websites from all sources
   const allWebsites = [...allResults, grR]
     .flatMap(r => [r?.website, ...(r?.html ? extractRealWebsites(r.html) : [])])
     .filter(Boolean)
     .filter(isRealAuthorWebsite);
-  const uniqueWebsites = [...new Set(allWebsites)].slice(0, 6);
+  const uniqueWebsites = [...new Set(allWebsites)].slice(0, 8);
+
+  // ── PHASE 1b: Try common email patterns and verify ────────────────────
+  // Many authors use predictable email patterns — try and verify instantly
+  const commonPatterns = [
+    `${firstName}@${firstName}${lastName}.com`,
+    `${firstName}.${lastName}@gmail.com`,
+    `${firstName}${lastName}@gmail.com`,
+    `contact@${firstName}${lastName}.com`,
+    `hello@${firstName}${lastName}.com`,
+    `${firstName}@${firstName}${lastName}author.com`,
+  ];
+  const patternResults = await Promise.all(
+    commonPatterns.map(async email => {
+      try {
+        const r = await axios.get(`https://api.hunter.io/v2/email-verifier?email=${encodeURIComponent(email)}&api_key=${HUNTER_API_KEY}`, { timeout: 5000 });
+        const status = r.data?.data?.status;
+        if (status === 'valid' || status === 'accept_all') return { email, status };
+      } catch(e) {}
+      return null;
+    })
+  );
+  const patternEmail = patternResults.find(r => r?.email);
+  if (patternEmail) {
+    saveLog('success', `📧 Pattern email verified: ${patternEmail.email}`);
+    return { email: patternEmail.email, website: uniqueWebsites[0] || null };
+  }
 
   if (uniqueWebsites.length === 0) {
     saveLog('info', `⏩ No online presence found for ${authorName} — skipping`);
