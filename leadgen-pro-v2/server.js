@@ -682,15 +682,18 @@ function isLikelyAuthorEmail(email, authorName) {
   const cleanName = authorName.toLowerCase().replace(/[^a-z\s]/g, '');
   const nameParts = cleanName.split(/\s+/).filter(p => p.length > 2);
 
-  // Check if string A contains at least 80% of string B's chars (fuzzy match for typos/variations)
+  // Check if haystack contains needle or a close variation (handles name spelling variants)
   function fuzzyContains(haystack, needle) {
     if (haystack.includes(needle)) return true;
     if (needle.length < 4) return false;
-    // Try substring match with 1 char difference (vivika vs viveka)
+    // Try all 4-char substrings of needle in haystack (catches vivika/viveka type variants)
     for (let i = 0; i <= needle.length - 4; i++) {
       const sub = needle.substring(i, i + 4);
       if (haystack.includes(sub)) return true;
     }
+    // Also try needle without vowels (consonant skeleton match)
+    const consonants = needle.replace(/[aeiou]/g, '');
+    if (consonants.length >= 3 && haystack.replace(/[aeiou]/g, '').includes(consonants)) return true;
     return false;
   }
 
@@ -750,10 +753,10 @@ function parseAmazonNewReleasesHtml(html) {
     const title = titleM ? titleM[1].trim() : '';
     if (!title) continue;
 
-    // Author from a-size-small text node between rating and price
-    const authorM = chunk.match(/a-size-small">\s*([\w][\w\s.,''-]{2,50}?)\s*[\d<]/) ||
-                    chunk.match(/a-link-child"[^>]*>([^<]{3,60})<\/a>/);
-    const author = authorM ? authorM[1].trim() : 'Unknown';
+    // Author is in the 2nd p13n-sc-css-line-clamp div (first is title, second is author)
+    const clampMatches = [...chunk.matchAll(/p13n-sc-css-line-clamp[^"]*"[^>]*>([^<]{2,80})<\//g)];
+    const author = clampMatches.length >= 2 ? clampMatches[1][1].trim() :
+                   (chunk.match(/href="\/[^"]*\/e\/[A-Z0-9]+[^"]*"[^>]*>([^<]{2,60})<\/a>/) || [])[1]?.trim() || 'Unknown';
 
     books.push({ asin, title, author, publishDate: '', amazonUrl: `https://www.amazon.com/dp/${asin}` });
   }
