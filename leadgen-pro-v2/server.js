@@ -1214,18 +1214,18 @@ app.post('/api/amazon', async (req, res) => {
             urlIndex++;
             page_num = 1;
             consecutiveEmpty = 0;
-            if (urlIndex >= AMAZON_SEARCH_URLS.length) {
+            if (urlIndex >= AMAZON_BASE_URLS.length) {
               urlIndex = 0;
-              saveLog(jobId, 'info', `🔄 Completed all ${AMAZON_SEARCH_URLS.length} category URLs — waiting 10min then restarting...`);
+              saveLog(jobId, 'info', `🔄 Completed all ${AMAZON_BASE_URLS.length} category URLs — waiting 10min then restarting...`);
               await new Promise(r => setTimeout(r, 10 * 60 * 1000));
               seenAsinsThisRun.clear();
             } else {
-              saveLog(jobId, 'info', `📂 Moving to next category URL ${urlIndex+1}/${AMAZON_SEARCH_URLS.length}...`);
+              saveLog(jobId, 'info', `📂 Moving to next category URL ${urlIndex+1}/${AMAZON_BASE_URLS.length}...`);
             }
           }
 
           const pageBatch = [page_num, page_num+1, page_num+2].filter(p => p <= maxPages);
-          saveLog(jobId, 'info', `📄 Category ${urlIndex+1}/${AMAZON_SEARCH_URLS.length} — pages ${pageBatch.join(',')}...`);
+          saveLog(jobId, 'info', `📄 Category ${urlIndex+1}/${AMAZON_BASE_URLS.length} — pages ${pageBatch.join(',')}...`);
           const batchResults = await Promise.all(pageBatch.map(p => scrapeOnePage(p)));
           page_num += 3;
           const pageBooks = batchResults.flat();
