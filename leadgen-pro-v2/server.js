@@ -1072,11 +1072,88 @@ app.post('/api/search', async (req, res) => {
     sendEvent('log', { level: 'info', message: `\n📍 Searching Craigslist (${cities.length} cities)...` });
     sendEvent('status', { message: `Searching Craigslist...` });
 
+    // Reuse a single browser for all CL work to avoid connection exhaustion
+    let clBrowser = null;
+    try {
+      sendEvent('log', { level: 'brightdata', message: `🌐 Opening shared Craigslist browser...` });
+      clBrowser = await puppeteer.connect({ browserWSEndpoint: BROWSER_WS });
+    } catch (e) {
+      sendEvent('log', { level: 'error', message: `❌ Could not connect browser: ${e.message}` });
+    }
+
+    // Helper: fetch a single CL post using shared browser
+    async function fetchCLPost(url) {
+      if (!clBrowser) return null;
+      const page = await clBrowser.newPage();
+      page.setDefaultNavigationTimeout(30000);
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await new Promise(r => setTimeout(r, 1000));
+        const html = await page.content();
+        await page.close();
+        return html;
+      } catch (e) {
+        await page.close().catch(() => {});
+        return null;
+      }
+    }
+
+    // Helper: scrape CL city listings using shared browser
+    async function scrapeCLCity(city, kw) {
+      const results = [];
+      if (!clBrowser) return results;
+      const page = await clBrowser.newPage();
+      page.setDefaultNavigationTimeout(45000);
+      let apiItems = [];
+      page.on('response', async (response) => {
+        const u = response.url();
+        if (u.includes('sapi.craigslist.org') && u.includes('postings/search/full')) {
+          try {
+            const json = await response.json();
+            const items = json?.data?.items || [];
+            if (items.length > 0 && Array.isArray(items[0]) && items[0].length >= 10) {
+              apiItems = items;
+            }
+          } catch(e) {}
+        }
+      });
+      const searchUrl = kw
+        ? `https://${city}.craigslist.org/search/ggg?query=${encodeURIComponent(kw)}`
+        : `https://${city}.craigslist.org/search/ggg`;
+      try {
+        await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+        for (let i = 0; i < 10 && apiItems.length === 0; i++) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+        for (const item of apiItems) {
+          if (Array.isArray(item) && item.length >= 10) {
+            const postingId = item[0];
+            const title = item[item.length - 1];
+            const slugArr = item.find(el => Array.isArray(el) && el[0] === 6);
+            const urlSlug = slugArr ? slugArr[1] : 'gig';
+            if (title && typeof title === 'string' && title.length > 5) {
+              results.push({
+                url: `https://${city}.craigslist.org/ggg/d/${urlSlug}/${postingId}.html`,
+                title, city
+              });
+            }
+          }
+        }
+        sendEvent('log', { level: 'success', message: `✅ ${city}: ${results.length} gigs` });
+      } catch (e) {
+        sendEvent('log', { level: 'error', message: `❌ ${city}: ${e.message}` });
+      } finally {
+        await page.close().catch(() => {});
+      }
+      return results;
+    }
+
     for (const city of cities) {
       if (verifiedCount >= targetLeads) break;
 
       try {
-        const listings = await scrapeCraigslistCity(city, keyword, sendEvent);
+        const listings = await scrapeCLCity(city, keyword);
+        sendEvent('log', { level: 'info', message: `📊 ${city}: ${listings.length} listings` });
 
         for (const listing of listings.slice(0, 20)) {
           if (verifiedCount >= targetLeads) break;
@@ -1084,24 +1161,23 @@ app.post('/api/search', async (req, res) => {
           // URL dedup
           const urlExists = db.prepare('SELECT id FROM intent_leads WHERE url = ?').get(listing.url);
           if (urlExists) {
-            sendEvent('log', { level: 'info', message: `⏭️ SKIP (seen URL): ${listing.url.substring(0, 60)}` });
+            sendEvent('log', { level: 'info', message: `⏭️ SKIP (seen): ${listing.url.substring(0, 60)}` });
             continue;
           }
 
           totalCount++;
 
-          // Fetch full post via scraping browser
-          sendEvent('log', { level: 'info', message: `🔍 Fetching post: ${listing.title.substring(0, 50)}...` });
+          // Fetch full post using shared browser
+          sendEvent('log', { level: 'info', message: `🔍 Fetching: ${listing.title.substring(0, 50)}...` });
           let contacts = {};
           let postFetched = false;
           try {
-            const postHtml = await scrapeWithBrowser(listing.url);
+            const postHtml = await fetchCLPost(listing.url);
             if (postHtml) {
               const { body } = parseCraigslistPost(postHtml);
               if (body && body.length > 20) {
-                sendEvent('log', { level: 'ai', message: `🤖 AI extracting contacts...` });
                 contacts = await extractContactsWithAI(body, listing.title);
-                sendEvent('log', { level: 'ai', message: `🧠 AI: Email="${contacts.email || 'N/A'}", Phone="${contacts.phone || 'N/A'}"` });
+                sendEvent('log', { level: 'ai', message: `🧠 Email="${contacts.email || 'N/A'}", Phone="${contacts.phone || 'N/A'}"` });
                 postFetched = true;
               }
             }
@@ -1109,7 +1185,6 @@ app.post('/api/search', async (req, res) => {
             sendEvent('log', { level: 'warning', message: `⚠️ Post fetch failed: ${fetchErr.message}` });
           }
           if (!postFetched) {
-            sendEvent('log', { level: 'warning', message: `⚠️ Skipping post — no content` });
             totalCount--;
             continue;
           }
@@ -1204,14 +1279,13 @@ app.post('/api/search', async (req, res) => {
           await new Promise(r => setTimeout(r, 500));
         }
 
-        sendEvent('log', { level: 'info', message: `📊 ${city}: ${listings.length} listings processed` });
-
       } catch (error) {
         sendEvent('log', { level: 'error', message: `❌ ${city}: ${error.message}` });
       }
-      // Small delay between cities to avoid connection exhaustion
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 500));
     }
+
+    if (clBrowser) await clBrowser.close().catch(() => {});
   }
 
   // Mark job complete
