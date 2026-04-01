@@ -165,6 +165,34 @@ async function verifyEmail(email) {
   }
 }
 
+// Hunter.io domain search — find emails for a given domain
+async function findEmailByDomain(domain, firstName = '', lastName = '') {
+  if (!domain || !HUNTER_API_KEY) return null;
+  try {
+    let url = `https://api.hunter.io/v2/domain-search?domain=${encodeURIComponent(domain)}&api_key=${HUNTER_API_KEY}&limit=5`;
+    const response = await axios.get(url, { timeout: 10000 });
+    const emails = response.data?.data?.emails || [];
+    if (emails.length === 0) return null;
+    // Prefer person-type emails, then any
+    const personEmail = emails.find(e => e.type === 'personal') || emails[0];
+    return personEmail?.value || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Extract website URL from post body text
+function extractWebsiteFromText(text) {
+  const urlMatch = text.match(/https?:\/\/[^\s<>"')\]]+/i) ||
+                   text.match(/www\.[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i);
+  if (!urlMatch) return null;
+  let url = urlMatch[0];
+  if (!url.startsWith('http')) url = 'https://' + url;
+  // Filter out craigslist itself
+  if (url.includes('craigslist.org')) return null;
+  return url;
+}
+
 // ============================================================
 // FRAMEWORK 1: INTENT LEADS (Craigslist + Reddit)
 // ============================================================
@@ -420,7 +448,7 @@ const BLOCKED_DOMAINS = [
   'audible.', 'barnesandnoble.', 'thriftbooks.', 'booksrun.', 'penguinrandomhouse.',
   'harpercollins.', 'simonandschuster.', 'macmillan.', 'randomhouse.', 'scholastic.',
   'bloomsbury.', 'hachette.', 'abrams.', 'sourcebooks.', 'tiktok.', 'apple.',
-  'microsoft.', 'cloudflare.', 'medium.', 'substack.', 'wordpress.com', 'blogger.com',
+  'microsoft.', 'cloudflare.', 'medium.com', 'substack.com', 'wordpress.com', 'blogger.com',
   'wix.com', 'squarespace.com', 'weebly.com', 'jimdo.com', 'site123.com',
   'strikingly.com', 'webnode.com', 'tumblr.com', 'myspace.com', 'booksamillion.com',
   'walmart.com', 'target.com', 'ebay.com', 'etsy.com', 'scribd.com', 'archive.org',
@@ -432,7 +460,18 @@ const BLOCKED_DOMAINS = [
   'sermoncentral.com', 'bookbeat.com', 'gramercybooksbexley.com', 'awesomebooks.com',
   'bookmans.com', 'hymnary.org', 'jacket2.org', 'jimruttshow.com',
   'helpingcouplesheal.com', 'ieee.es', 'alabama.gov', 'bookmanager.com',
-  'nytimes.com', 'theguardian.com', 'huffpost.com', 'buzzfeed.com'
+  'nytimes.com', 'theguardian.com', 'huffpost.com', 'buzzfeed.com',
+  // Document / file sharing — not author websites
+  'yumpu.com', 'slideshare.net', 'issuu.com', 'scribd.com', 'docplayer.net',
+  'docslib.org', 'edoc.pub', 'pdfslide.net', 'vdocuments.mx', 'academia.edu',
+  'researchgate.net', 'semanticscholar.org', 'arxiv.org', 'ssrn.com',
+  // Book aggregators / retailers
+  'thriftbooks.com', 'abebooks.com', 'alibris.com', 'chegg.com', 'vitalsource.com',
+  'bookdepository.com', 'chapters.indigo.ca', 'waterstones.com', 'bookpeople.com',
+  // Generic content farms
+  'quora.com', 'answers.com', 'ehow.com', 'wikihow.com', 'thoughtco.com',
+  'verywellmind.com', 'psychologytoday.com', 'healthline.com', 'webmd.com',
+  'inc.com', 'entrepreneur.com', 'forbes.com', 'businessinsider.com',
 ];
 
 function isRealAuthorWebsite(url) {
@@ -543,55 +582,81 @@ async function scrapeAmazonBooks(targetLeads, dateFrom, dateTo, sendEvent) {
 
 // Find author contact info via Google search — REAL AUTHOR WEBSITE ONLY
 async function findAuthorContact(authorName, bookTitle, sendEvent) {
-  const query = `"${authorName}" "${bookTitle}" author`;
-  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=5`;
-
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
   function extractRealAuthorWebsiteFromHtml(html) {
-    const urlRegex = /href="(https?:\/\/[^"]+)"/g;
+    // Extract all href URLs, pick first real author website
+    const urlRegex = /href="(https?:\/\/[^"#?]+)"/g;
     let match;
+    const candidates = [];
     while ((match = urlRegex.exec(html)) !== null) {
-      const url = match[1].split('?')[0];
-      if (isRealAuthorWebsite(url)) {
-        return url;
-      }
+      const url = match[1];
+      if (isRealAuthorWebsite(url)) candidates.push(url);
     }
-    return null;
+    // Prefer shorter domains (e.g. authorname.com over authorname.com/books/xyz)
+    candidates.sort((a, b) => a.length - b.length);
+    return candidates.length > 0 ? candidates[0] : null;
   }
 
-  try {
-    sendEvent('log', { level: 'brightdata', message: `🔍 Google: Searching for "${authorName}"...` });
-    const html = await scrapeWithBrightData(searchUrl);
-    if (!html) return { email: null, website: null };
+  // Try multiple search queries to maximise hit rate
+  const queries = [
+    `"${authorName}" author official website`,
+    `"${authorName}" author email contact`,
+    `"${authorName}" "${bookTitle}" author website`,
+  ];
 
-    // Extract emails
-    const rawEmails = html.match(emailRegex) || [];
-    const emails = rawEmails.filter(e => !isBlockedEmail(e));
-    const email = emails.length > 0 ? emails[0] : null;
+  for (const query of queries) {
+    try {
+      const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&num=5`;
+      sendEvent('log', { level: 'brightdata', message: `🔍 Google: "${query.substring(0, 60)}"` });
+      const html = await scrapeWithBrightData(searchUrl);
+      if (!html) continue;
 
-    // Extract real author website only
-    const website = extractRealAuthorWebsiteFromHtml(html);
+      // Extract emails directly from search results page
+      const rawEmails = html.match(emailRegex) || [];
+      const emails = rawEmails.filter(e => !isBlockedEmail(e));
+      const email = emails.length > 0 ? emails[0] : null;
 
-    // If no email found but we have a real website, try scraping the website
-    if (!email && website) {
-      sendEvent('log', { level: 'info', message: `🌐 Visiting ${website} to find email...` });
-      try {
-        const siteHtml = await scrapeWithBrightData(website);
-        if (siteHtml) {
-          const siteEmails = (siteHtml.match(emailRegex) || []).filter(e => !isBlockedEmail(e));
-          if (siteEmails.length > 0) {
-            return { email: siteEmails[0], website };
+      // Extract real author website
+      const website = extractRealAuthorWebsiteFromHtml(html);
+
+      // If email found directly → done
+      if (email && website) return { email, website };
+
+      // If website found but no email → visit the website
+      if (website) {
+        sendEvent('log', { level: 'info', message: `🌐 Visiting ${website}...` });
+        try {
+          // Try /contact page first, then homepage
+          const pagesToTry = [
+            website.replace(/\/$/, '') + '/contact',
+            website.replace(/\/$/, '') + '/contact-me',
+            website
+          ];
+          for (const pageUrl of pagesToTry) {
+            const siteHtml = await scrapeWithBrightData(pageUrl);
+            if (siteHtml) {
+              const siteEmails = (siteHtml.match(emailRegex) || []).filter(e => !isBlockedEmail(e));
+              if (siteEmails.length > 0) {
+                sendEvent('log', { level: 'success', message: `📧 Email found on ${pageUrl}: ${siteEmails[0]}` });
+                return { email: siteEmails[0], website };
+              }
+            }
           }
-        }
-      } catch (e) { /* ignore */ }
-    }
+        } catch (e) { /* ignore */ }
+        // Website found but no email — return website only (will be saved but not counted)
+        if (email) return { email, website };
+        return { email: null, website };
+      }
 
-    return { email, website };
-  } catch (error) {
-    sendEvent('log', { level: 'error', message: `❌ Contact search error: ${error.message}` });
-    return { email: null, website: null };
+      if (email) return { email, website: null };
+
+    } catch (error) {
+      sendEvent('log', { level: 'warning', message: `⚠️ Search error: ${error.message}` });
+    }
   }
+
+  return { email: null, website: null };
 }
 
 // ============================================================
@@ -744,16 +809,14 @@ app.post('/api/amazon', async (req, res) => {
       try {
         await amzPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
-        // Wait for non-empty data-asin to appear (real books loaded)
+        // Wait for actual search result items (not just sponsored)
         await amzPage.waitForFunction(
-          () => document.querySelector('[data-asin]:not([data-asin=""])') !== null,
-          { timeout: 30000 }
-        ).catch(() => {
-          // Timeout — results may still be loading
-        });
+          () => document.querySelectorAll('[data-component-type="s-search-result"][data-asin]:not([data-asin=""])').length > 0,
+          { timeout: 35000 }
+        ).catch(() => {});
 
-        // Extra wait for dynamic content
-        await new Promise(r => setTimeout(r, 3000));
+        // Extra wait
+        await new Promise(r => setTimeout(r, 2000));
 
         // Check CAPTCHA
         const isCaptcha = await amzPage.$('input#captchacharacters').catch(() => null);
@@ -766,40 +829,43 @@ app.post('/api/amazon', async (req, res) => {
           continue;
         }
 
-        // Count non-empty ASINs
-        const nonEmptyAsins = await amzPage.$$eval(
-          '[data-asin]:not([data-asin=""])',
-          els => els.map(el => el.getAttribute('data-asin')).filter(a => a && a.length >= 8)
-        ).catch(() => []);
-        sendEvent('log', { level: 'info', message: `🔍 Non-empty ASINs found: ${nonEmptyAsins.length}` });
+        // Count search result items
+        const resultCount = await amzPage.$$eval(
+          '[data-component-type="s-search-result"][data-asin]:not([data-asin=""])',
+          els => els.length
+        ).catch(() => 0);
+        sendEvent('log', { level: 'info', message: `🔍 Search result items: ${resultCount}` });
 
-        pageBooks = await amzPage.$$eval('[data-asin]:not([data-asin=""])', (items) => {
-          return items.map(item => {
-            const asin = item.getAttribute('data-asin') || '';
-            if (!asin || asin.length < 8) return null;
-            // Title
-            const titleEl = item.querySelector('h2 a span') ||
-                            item.querySelector('h2 span') ||
-                            item.querySelector('[data-cy="title-recipe"] span') ||
-                            item.querySelector('.a-size-medium.a-color-base.a-text-normal') ||
-                            item.querySelector('.a-size-base-plus.a-color-base.a-text-normal') ||
-                            item.querySelector('.a-size-medium') ||
-                            item.querySelector('.a-size-base-plus');
-            const title = titleEl ? titleEl.textContent.trim() : '';
-            if (!title || title.length < 3) return null;
-            // Author
-            const authorEl = item.querySelector('a.a-link-normal[href*="/e/"]') ||
-                             item.querySelector('.a-row a.a-link-normal') ||
-                             item.querySelector('[class*="author"] .a-link-normal') ||
-                             item.querySelector('span.a-size-base a');
-            const author = authorEl ? authorEl.textContent.trim() : '';
-            // Date
-            const spans = Array.from(item.querySelectorAll('span.a-size-base.a-color-secondary'));
-            const dateEl = spans.find(s => /\w+ \d{1,2},? \d{4}/.test(s.textContent));
-            const publishDate = dateEl ? dateEl.textContent.trim() : '';
-            return { asin, title, author: author || 'Unknown', publishDate };
-          }).filter(Boolean);
-        }).catch(() => []);
+        pageBooks = await amzPage.$$eval(
+          '[data-component-type="s-search-result"][data-asin]:not([data-asin=""])',
+          (items) => {
+            return items.map(item => {
+              const asin = item.getAttribute('data-asin') || '';
+              if (!asin || asin.length < 8) return null;
+              // Title
+              const titleEl = item.querySelector('h2 a span') ||
+                              item.querySelector('h2 span') ||
+                              item.querySelector('[data-cy="title-recipe"] span') ||
+                              item.querySelector('.a-size-medium.a-color-base.a-text-normal') ||
+                              item.querySelector('.a-size-base-plus.a-color-base.a-text-normal') ||
+                              item.querySelector('.a-size-medium') ||
+                              item.querySelector('.a-size-base-plus');
+              const title = titleEl ? titleEl.textContent.trim() : '';
+              if (!title || title.length < 3) return null;
+              // Author - prefer author page links
+              const authorEl = item.querySelector('a.a-link-normal[href*="/e/"]') ||
+                               item.querySelector('a.a-link-normal[href*="field-author"]') ||
+                               item.querySelector('[class*="author"] .a-link-normal') ||
+                               item.querySelector('.a-row a.a-link-normal');
+              const author = authorEl ? authorEl.textContent.trim() : '';
+              // Date
+              const spans = Array.from(item.querySelectorAll('span.a-size-base.a-color-secondary'));
+              const dateEl = spans.find(s => /\w+ \d{1,2},? \d{4}/.test(s.textContent));
+              const publishDate = dateEl ? dateEl.textContent.trim() : '';
+              return { asin, title, author: author || 'Unknown', publishDate };
+            }).filter(Boolean);
+          }
+        ).catch(() => []);
 
         await amzPage.close();
 
@@ -1194,12 +1260,14 @@ app.post('/api/search', async (req, res) => {
           // Fetch full post using shared browser
           sendEvent('log', { level: 'info', message: `🔍 Fetching: ${listing.title.substring(0, 50)}...` });
           let contacts = {};
+          let postBody = '';
           let postFetched = false;
           try {
             const postHtml = await fetchCLPost(listing.url);
             if (postHtml) {
               const { body } = parseCraigslistPost(postHtml);
               if (body && body.length > 20) {
+                postBody = body;
                 contacts = await extractContactsWithAI(body, listing.title);
                 sendEvent('log', { level: 'ai', message: `🧠 Email="${contacts.email || 'N/A'}", Phone="${contacts.phone || 'N/A'}"` });
                 postFetched = true;
@@ -1211,6 +1279,24 @@ app.post('/api/search', async (req, res) => {
           if (!postFetched) {
             totalCount--;
             continue;
+          }
+
+          // CL hides emails behind relay system — if no email from AI,
+          // try to find website in post body and do Hunter domain search
+          if (!contacts.email && postBody) {
+            const website = extractWebsiteFromText(postBody);
+            if (website) {
+              try {
+                const domain = new URL(website).hostname.replace(/^www\./, '');
+                sendEvent('log', { level: 'hunter', message: `🔍 Hunter domain search: ${domain}` });
+                const domainEmail = await findEmailByDomain(domain);
+                if (domainEmail) {
+                  contacts.email = domainEmail;
+                  contacts.website = website;
+                  sendEvent('log', { level: 'success', message: `📧 Hunter found: ${domainEmail}` });
+                }
+              } catch(e) {}
+            }
           }
 
           // Budget filter
