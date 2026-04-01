@@ -1091,6 +1091,7 @@ app.post('/api/amazon', async (req, res) => {
       let keepGoing = true;
       let consecutiveEmpty = 0;
       let amazonBrowser = null;
+      let loopCount = 0; // how many times we've cycled through all pages
 
       try {
         saveLog(jobId, 'brightdata', `🌐 Connecting to Scraping Browser for Amazon...`);
@@ -1122,14 +1123,23 @@ app.post('/api/amazon', async (req, res) => {
           } catch(e) { await pg.close().catch(()=>{}); return []; }
         }
 
-        while (keepGoing && page_num <= maxPages) {
+        while (keepGoing) {
+          // When we reach the end of Amazon pages, loop back to page 1 with a fresh date offset
+          if (page_num > maxPages) {
+            loopCount++;
+            page_num = 1;
+            consecutiveEmpty = 0;
+            saveLog(jobId, 'info', `🔄 Loop ${loopCount}: Restarting from page 1 (verified so far: ${verifiedCount}/${targetLeads})...`);
+            await new Promise(r => setTimeout(r, 3000));
+          }
+
           const pageBatch = [page_num, page_num+1, page_num+2].filter(p => p <= maxPages);
           saveLog(jobId, 'info', `📄 Scraping Amazon pages ${pageBatch.join(',')} in parallel...`);
           const batchResults = await Promise.all(pageBatch.map(p => scrapeOnePage(p)));
           page_num += 3;
           const pageBooks = batchResults.flat();
           saveLog(jobId, 'info', `📚 Got ${pageBooks.length} books from ${pageBatch.length} pages`);
-          if (pageBooks.length === 0) { consecutiveEmpty++; if(consecutiveEmpty>=2) break; continue; }
+          if (pageBooks.length === 0) { consecutiveEmpty++; if(consecutiveEmpty>=3) { page_num = maxPages + 1; } continue; }
           consecutiveEmpty = 0;
 
           // Concurrency pool — always keep CONCURRENCY slots busy
