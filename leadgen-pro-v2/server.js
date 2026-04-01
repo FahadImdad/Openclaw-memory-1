@@ -456,19 +456,9 @@ function isBlockedEmail(email) {
 
 // Build Amazon search URL based on date range
 function buildAmazonUrl(dateFrom, dateTo, page = 1) {
-  // Use date-desc-rank with general new releases; filter locally by publish date
-  let base = 'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A283155';
-  // Map to rough Amazon publication date filters
-  const now = new Date();
-  const fromDate = new Date(dateFrom);
-  const diffDays = Math.ceil((now - fromDate) / (1000 * 60 * 60 * 24));
-  if (diffDays <= 1) {
-    base += '%2Cp_n_publication_date%3A1250226011';
-  } else if (diffDays <= 7) {
-    base += '%2Cp_n_publication_date%3A1250227011';
-  } else if (diffDays <= 30) {
-    base += '%2Cp_n_publication_date%3A1250225011';
-  }
+  // Use date-desc-rank with general new releases
+  // Use 30-day filter by default for broadest coverage — we filter by date locally
+  let base = 'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A283155%2Cp_n_publication_date%3A1250225011';
   if (page > 1) {
     base += `&page=${page}`;
   }
@@ -725,24 +715,61 @@ app.post('/api/amazon', async (req, res) => {
 
       let pageBooks = [];
       try {
-        await page.goto(url, { waitUntil: 'domcontentloaded' });
-        await page.waitForSelector('[data-component-type="s-search-result"]', { timeout: 15000 }).catch(() => {});
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+
+        // Check if we got a CAPTCHA or blocked page
+        const pageTitle = await page.title().catch(() => '');
+        const pageUrl = page.url();
+        sendEvent('log', { level: 'info', message: `📄 Page title: "${pageTitle}" | URL: ${pageUrl.substring(0, 80)}` });
+
+        // Wait a bit for dynamic content
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Check for CAPTCHA
+        const isCaptcha = await page.$('#captchacharacters, form[action*="captcha"], .a-box-inner img[src*="captcha"]').catch(() => null);
+        if (isCaptcha) {
+          sendEvent('log', { level: 'warning', message: `⚠️ Amazon CAPTCHA detected on page ${page_num} — Bright Data should handle this, retrying...` });
+          await new Promise(r => setTimeout(r, 5000));
+        }
+
+        await page.waitForSelector('[data-component-type="s-search-result"]', { timeout: 20000 }).catch(() => {});
+
+        // Count items before extracting
+        const itemCount = await page.$$eval('[data-component-type="s-search-result"]', els => els.length).catch(() => 0);
+        sendEvent('log', { level: 'info', message: `📊 Found ${itemCount} result elements on page` });
+
+        if (itemCount === 0) {
+          // Dump some page content for debugging
+          const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 300) || '').catch(() => '');
+          sendEvent('log', { level: 'warning', message: `⚠️ Page content preview: ${bodyText.replace(/\n/g, ' ').substring(0, 200)}` });
+        }
 
         pageBooks = await page.$$eval('[data-component-type="s-search-result"]', (items) => {
           return items.map(item => {
             const asin = item.getAttribute('data-asin') || '';
-            const titleEl = item.querySelector('h2 a span') || item.querySelector('.a-size-medium') || item.querySelector('.a-size-base-plus');
+            // Try multiple title selectors
+            const titleEl = item.querySelector('h2 a span') ||
+                            item.querySelector('h2 span') ||
+                            item.querySelector('.a-size-medium.a-color-base.a-text-normal') ||
+                            item.querySelector('.a-size-base-plus.a-color-base.a-text-normal') ||
+                            item.querySelector('.a-size-medium') ||
+                            item.querySelector('.a-size-base-plus');
             const title = titleEl ? titleEl.textContent.trim() : '';
+            // Try multiple author selectors
             const authorEl = item.querySelector('.a-row .a-size-base+ .a-size-base') ||
+                             item.querySelector('div.a-row.a-size-base.a-color-secondary span.a-size-base') ||
                              item.querySelector('[class*="author"] .a-link-normal') ||
-                             item.querySelector('.a-row a.a-link-normal');
-            const author = authorEl ? authorEl.textContent.trim() : '';
+                             item.querySelector('.a-row a.a-link-normal') ||
+                             item.querySelector('span.a-size-base a.a-link-normal');
+            const author = authorEl ? authorEl.textContent.trim().replace(/^by\s+/i, '') : '';
+            // Publication date
             const dateEl = item.querySelector('.a-color-secondary .a-size-base') ||
+                           item.querySelector('span.a-size-base.a-color-secondary') ||
                            item.querySelector('[class*="publication"]');
             const publishDate = dateEl ? dateEl.textContent.trim() : '';
             return { asin, title, author, publishDate };
-          }).filter(b => b.asin && b.title);
-        });
+          }).filter(b => b.asin && b.title && b.title.length > 2);
+        }).catch(() => []);
         await page.close();
       } catch (pageError) {
         await page.close().catch(() => {});
@@ -751,7 +778,12 @@ app.post('/api/amazon', async (req, res) => {
       }
 
       if (pageBooks.length === 0) {
-        sendEvent('log', { level: 'warning', message: `⚠️ No books on page ${page_num}, stopping.` });
+        sendEvent('log', { level: 'warning', message: `⚠️ No books on page ${page_num} — Amazon may be blocking or date filter too narrow. Try a wider date range.` });
+        // Try next page once before giving up
+        if (page_num === 1) {
+          page_num++;
+          continue;
+        }
         break;
       }
 
