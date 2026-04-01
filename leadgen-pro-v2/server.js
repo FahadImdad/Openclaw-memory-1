@@ -631,6 +631,9 @@ const BLOCKED_DOMAINS = [
   'bookmans.com', 'hymnary.org', 'jacket2.org', 'jimruttshow.com',
   'helpingcouplesheal.com', 'ieee.es', 'alabama.gov', 'bookmanager.com',
   'nytimes.com', 'theguardian.com', 'huffpost.com', 'buzzfeed.com',
+  'bing.com', 'th.bing.com', 'cern.ch', 'cds.cern.ch', 'academia.edu',
+  'researchgate.net', 'springer.com', 'wiley.com', 'tandfonline.com',
+  'journals.', 'doi.org', 'ncbi.nlm.nih.gov', 'pubmed.',
   // Document / file sharing — not author websites
   'yumpu.com', 'slideshare.net', 'issuu.com', 'scribd.com', 'docplayer.net',
   'docslib.org', 'edoc.pub', 'pdfslide.net', 'vdocuments.mx', 'academia.edu',
@@ -1098,7 +1101,8 @@ app.post('/api/amazon', async (req, res) => {
       let keepGoing = true;
       let consecutiveEmpty = 0;
       let amazonBrowser = null;
-      let loopCount = 0; // how many times we've cycled through all pages
+      let loopCount = 0;
+      const seenAsinsThisRun = new Set(); // track ASINs seen in current loop to detect Amazon repeats
 
       try {
         saveLog(jobId, 'brightdata', `🌐 Connecting to Scraping Browser for Amazon...`);
@@ -1124,7 +1128,9 @@ app.post('/api/amazon', async (req, res) => {
               const authorEl = item.querySelector('.a-row .a-size-base+ .a-size-base')||item.querySelector('[class*="author"] .a-link-normal')||item.querySelector('.a-row a.a-link-normal');
               const author = authorEl ? authorEl.textContent.trim() : '';
               const dateEl = item.querySelector('.a-color-secondary .a-size-base')||item.querySelector('[class*="publication"]');
-              return { asin, title, author: author||'Unknown', publishDate: dateEl ? dateEl.textContent.trim() : '' };
+              const rawDate = dateEl ? dateEl.textContent.trim() : '';
+              const publishDate = /\d{4}/.test(rawDate) ? rawDate : '';
+              return { asin, title, author: author||'Unknown', publishDate };
             }).filter(b => b&&b.asin&&b.title)).catch(()=>[]);
             await pg.close(); return books;
           } catch(e) { await pg.close().catch(()=>{}); return []; }
@@ -1136,8 +1142,9 @@ app.post('/api/amazon', async (req, res) => {
             loopCount++;
             page_num = 1;
             consecutiveEmpty = 0;
-            saveLog(jobId, 'info', `🔄 Loop ${loopCount}: Restarting from page 1 (verified so far: ${verifiedCount}/${targetLeads})...`);
-            await new Promise(r => setTimeout(r, 3000));
+            seenAsinsThisRun.clear(); // reset so we can find newly published books
+            saveLog(jobId, 'info', `🔄 Loop ${loopCount}: Restarting from page 1 — waiting 10min for new Amazon listings...`);
+            await new Promise(r => setTimeout(r, 10 * 60 * 1000)); // wait 10 min for new books
           }
 
           const pageBatch = [page_num, page_num+1, page_num+2].filter(p => p <= maxPages);
@@ -1153,12 +1160,20 @@ app.post('/api/amazon', async (req, res) => {
           const CONCURRENCY = 30;
           saveLog(jobId, 'info', `⚡ Processing ${pageBooks.length} authors with ${CONCURRENCY} concurrent workers...`);
 
-          // Filter out already-seen ASINs upfront
+          // Filter out already-seen ASINs (both DB and current run)
           const newBooks = pageBooks.filter(book => {
+            if (seenAsinsThisRun.has(book.asin)) return false;
             const exists = db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(book.asin);
-            if (exists) { saveLog(jobId, 'info', `⏭️ SKIP: ${book.asin}`); return false; }
+            if (exists) { seenAsinsThisRun.add(book.asin); return false; }
+            seenAsinsThisRun.add(book.asin);
             return true;
           });
+
+          // If all books on this batch were repeats, Amazon is cycling — move to next loop
+          if (newBooks.length === 0 && pageBooks.length > 0) {
+            consecutiveEmpty++;
+            saveLog(jobId, 'info', `⏭️ All books already seen on pages ${page_num-3}-${page_num} — Amazon cycling`);
+          }
 
           // Run with concurrency pool
           let bookIndex = 0;
