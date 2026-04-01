@@ -592,6 +592,8 @@
               stats.verified = verified;
               stats.contacts = total;
               updateStats();
+              // Live load leads into table as they come in
+              if (verified > 0) loadIntentLeadsFromJob(data.job.id);
             } else if (framework === 'amazon') {
               const pct = Math.min(100, Math.round((verified / target) * 100));
               document.getElementById('progressText-amazon').textContent = `${verified} / ${target}`;
@@ -599,8 +601,10 @@
               amazonStats.books = total;
               amazonStats.emails = verified;
               updateAmazonStats();
+              // Live load leads into table as they come in
               if (verified > 0) {
                 document.getElementById('amazonExportBar').classList.remove('hidden');
+                loadAmazonLeadsFromJob(data.job.id);
               }
             }
 
