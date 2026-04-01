@@ -809,63 +809,32 @@ app.post('/api/amazon', async (req, res) => {
       try {
         await amzPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
-        // Wait for actual search result items (not just sponsored)
-        await amzPage.waitForFunction(
-          () => document.querySelectorAll('[data-component-type="s-search-result"][data-asin]:not([data-asin=""])').length > 0,
-          { timeout: 35000 }
-        ).catch(() => {});
+        // Original working approach: simple waitForSelector
+        await amzPage.waitForSelector('[data-component-type="s-search-result"]', { timeout: 20000 }).catch(() => {});
 
-        // Extra wait
-        await new Promise(r => setTimeout(r, 2000));
+        pageBooks = await amzPage.$$eval('[data-component-type="s-search-result"]', (items) => {
+          return items.map(item => {
+            const asin = item.getAttribute('data-asin') || '';
+            if (!asin) return null;
+            const titleEl = item.querySelector('h2 a span') ||
+                            item.querySelector('h2 span') ||
+                            item.querySelector('.a-size-medium') ||
+                            item.querySelector('.a-size-base-plus');
+            const title = titleEl ? titleEl.textContent.trim() : '';
+            if (!title || title.length < 3) return null;
+            const authorEl = item.querySelector('.a-row .a-size-base+ .a-size-base') ||
+                             item.querySelector('[class*="author"] .a-link-normal') ||
+                             item.querySelector('.a-row a.a-link-normal');
+            const author = authorEl ? authorEl.textContent.trim() : '';
+            const dateEl = item.querySelector('.a-color-secondary .a-size-base') ||
+                           item.querySelector('[class*="publication"]');
+            const publishDate = dateEl ? dateEl.textContent.trim() : '';
+            return { asin, title, author: author || 'Unknown', publishDate };
+          }).filter(b => b && b.asin && b.title);
+        }).catch(() => []);
 
-        // Check CAPTCHA
-        const isCaptcha = await amzPage.$('input#captchacharacters').catch(() => null);
-        if (isCaptcha) {
-          sendEvent('log', { level: 'warning', message: `⚠️ CAPTCHA on page ${page_num}, skipping...` });
-          await amzPage.close();
-          consecutiveEmpty++;
-          if (consecutiveEmpty >= 2) break;
-          page_num++;
-          continue;
-        }
-
-        // Count search result items
-        const resultCount = await amzPage.$$eval(
-          '[data-component-type="s-search-result"][data-asin]:not([data-asin=""])',
-          els => els.length
-        ).catch(() => 0);
-        sendEvent('log', { level: 'info', message: `🔍 Search result items: ${resultCount}` });
-
-        pageBooks = await amzPage.$$eval(
-          '[data-component-type="s-search-result"][data-asin]:not([data-asin=""])',
-          (items) => {
-            return items.map(item => {
-              const asin = item.getAttribute('data-asin') || '';
-              if (!asin || asin.length < 8) return null;
-              // Title
-              const titleEl = item.querySelector('h2 a span') ||
-                              item.querySelector('h2 span') ||
-                              item.querySelector('[data-cy="title-recipe"] span') ||
-                              item.querySelector('.a-size-medium.a-color-base.a-text-normal') ||
-                              item.querySelector('.a-size-base-plus.a-color-base.a-text-normal') ||
-                              item.querySelector('.a-size-medium') ||
-                              item.querySelector('.a-size-base-plus');
-              const title = titleEl ? titleEl.textContent.trim() : '';
-              if (!title || title.length < 3) return null;
-              // Author - prefer author page links
-              const authorEl = item.querySelector('a.a-link-normal[href*="/e/"]') ||
-                               item.querySelector('a.a-link-normal[href*="field-author"]') ||
-                               item.querySelector('[class*="author"] .a-link-normal') ||
-                               item.querySelector('.a-row a.a-link-normal');
-              const author = authorEl ? authorEl.textContent.trim() : '';
-              // Date
-              const spans = Array.from(item.querySelectorAll('span.a-size-base.a-color-secondary'));
-              const dateEl = spans.find(s => /\w+ \d{1,2},? \d{4}/.test(s.textContent));
-              const publishDate = dateEl ? dateEl.textContent.trim() : '';
-              return { asin, title, author: author || 'Unknown', publishDate };
-            }).filter(Boolean);
-          }
-        ).catch(() => []);
+        const resultCount = pageBooks.length;
+        sendEvent('log', { level: 'info', message: `🔍 Found ${resultCount} results on page ${page_num}` });
 
         await amzPage.close();
 
