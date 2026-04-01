@@ -809,8 +809,11 @@ app.post('/api/amazon', async (req, res) => {
       try {
         await amzPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
-        // Original working approach: simple waitForSelector
+        // Wait for results to appear
         await amzPage.waitForSelector('[data-component-type="s-search-result"]', { timeout: 20000 }).catch(() => {});
+
+        // Small delay to let JS populate ASIN attributes (they start empty)
+        await new Promise(r => setTimeout(r, 2500));
 
         pageBooks = await amzPage.$$eval('[data-component-type="s-search-result"]', (items) => {
           return items.map(item => {
@@ -830,7 +833,7 @@ app.post('/api/amazon', async (req, res) => {
                            item.querySelector('[class*="publication"]');
             const publishDate = dateEl ? dateEl.textContent.trim() : '';
             return { asin, title, author: author || 'Unknown', publishDate };
-          }).filter(b => b && b.asin && b.title);
+          }).filter(b => b && b.asin && b.asin.length >= 8 && b.title);
         }).catch(() => []);
 
         const resultCount = pageBooks.length;
