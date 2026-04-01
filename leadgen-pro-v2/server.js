@@ -668,14 +668,45 @@ function isBlockedEmail(email) {
   return false;
 }
 
-// Build Amazon search URL based on date range
+// Multiple Amazon search URLs to get diverse books across categories and date filters
+const AMAZON_SEARCH_URLS = [
+  // All books - different date filters
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A283155%2Cp_n_publication_date%3A1250226011', // today
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A283155%2Cp_n_publication_date%3A1250227011', // last 7 days
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A283155%2Cp_n_publication_date%3A1250225011', // last 30 days
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A283155',                                     // all time new
+  // Business & Money
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A2635',
+  // Self Help
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A4736',
+  // Health & Fitness
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A6',
+  // Biographies
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A486994011',
+  // Religion & Spirituality
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A22',
+  // Parenting & Relationships
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A4919',
+  // Education & Teaching
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A4677',
+  // Science & Math
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A75',
+  // History
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A9',
+  // Politics & Social Sciences
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A11232',
+  // Travel
+  'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A2642',
+];
+
 function buildAmazonUrl(dateFrom, dateTo, page = 1) {
-  // Use date-desc-rank with general new releases
-  // Use 30-day filter by default for broadest coverage — we filter by date locally
-  let base = 'https://www.amazon.com/s?i=stripbooks&s=date-desc-rank&rh=n%3A283155%2Cp_n_publication_date%3A1250225011';
-  if (page > 1) {
-    base += `&page=${page}`;
-  }
+  // Cycle through different search URLs based on loopCount and page to maximize unique books
+  return null; // replaced by getAmazonUrl below
+}
+
+function getAmazonUrl(urlIndex, page) {
+  const base = AMAZON_SEARCH_URLS[urlIndex % AMAZON_SEARCH_URLS.length];
+  if (page > 1) return base + `&page=${page}`;
   return base;
 }
 
@@ -1097,12 +1128,12 @@ app.post('/api/amazon', async (req, res) => {
       saveLog(jobId, 'info', `🚀 Starting Amazon Author Lead Gen (job #${jobId}, target: ${targetLeads} verified leads)...`);
 
       let page_num = 1;
-      const maxPages = 50;
+      const maxPages = 20; // 20 pages per category URL
       let keepGoing = true;
       let consecutiveEmpty = 0;
       let amazonBrowser = null;
-      let loopCount = 0;
-      const seenAsinsThisRun = new Set(); // track ASINs seen in current loop to detect Amazon repeats
+      let urlIndex = 0; // which category URL we're currently on
+      const seenAsinsThisRun = new Set();
 
       try {
         saveLog(jobId, 'brightdata', `🌐 Connecting to Scraping Browser for Amazon...`);
@@ -1110,7 +1141,7 @@ app.post('/api/amazon', async (req, res) => {
 
         // Scrape 3 Amazon pages in parallel per iteration
         async function scrapeOnePage(pageNum) {
-          const pgUrl = buildAmazonUrl(dateFrom, dateTo, pageNum);
+          const pgUrl = getAmazonUrl(urlIndex, pageNum);
           if (!amazonBrowser || !amazonBrowser.isConnected()) {
             try { if (amazonBrowser) await amazonBrowser.close().catch(()=>{}); amazonBrowser = await puppeteer.connect({ browserWSEndpoint: BROWSER_WS }); }
             catch(e) { return []; }
@@ -1139,16 +1170,21 @@ app.post('/api/amazon', async (req, res) => {
         while (keepGoing) {
           // When we reach the end of Amazon pages, loop back to page 1 with a fresh date offset
           if (page_num > maxPages) {
-            loopCount++;
+            urlIndex++;
             page_num = 1;
             consecutiveEmpty = 0;
-            seenAsinsThisRun.clear(); // reset so we can find newly published books
-            saveLog(jobId, 'info', `🔄 Loop ${loopCount}: Restarting from page 1 — waiting 10min for new Amazon listings...`);
-            await new Promise(r => setTimeout(r, 10 * 60 * 1000)); // wait 10 min for new books
+            if (urlIndex >= AMAZON_SEARCH_URLS.length) {
+              urlIndex = 0;
+              saveLog(jobId, 'info', `🔄 Completed all ${AMAZON_SEARCH_URLS.length} category URLs — waiting 10min then restarting...`);
+              await new Promise(r => setTimeout(r, 10 * 60 * 1000));
+              seenAsinsThisRun.clear();
+            } else {
+              saveLog(jobId, 'info', `📂 Moving to next category URL ${urlIndex+1}/${AMAZON_SEARCH_URLS.length}...`);
+            }
           }
 
           const pageBatch = [page_num, page_num+1, page_num+2].filter(p => p <= maxPages);
-          saveLog(jobId, 'info', `📄 Scraping Amazon pages ${pageBatch.join(',')} in parallel...`);
+          saveLog(jobId, 'info', `📄 Category ${urlIndex+1}/${AMAZON_SEARCH_URLS.length} — pages ${pageBatch.join(',')}...`);
           const batchResults = await Promise.all(pageBatch.map(p => scrapeOnePage(p)));
           page_num += 3;
           const pageBooks = batchResults.flat();
