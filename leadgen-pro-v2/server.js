@@ -1227,8 +1227,8 @@ app.post('/api/amazon', async (req, res) => {
           if (pageBooks.length === 0) { consecutiveEmpty++; if(consecutiveEmpty>=3) { page_num = maxPages + 1; } continue; }
           consecutiveEmpty = 0;
 
-          // Concurrency pool — keep CONCURRENCY slots busy (low to avoid connection exhaustion)
-          const CONCURRENCY = 5;
+          // Concurrency pool — keep CONCURRENCY slots busy
+          const CONCURRENCY = 15;
           saveLog(jobId, 'info', `⚡ Processing ${pageBooks.length} authors with ${CONCURRENCY} concurrent workers...`);
 
           // Filter out already-seen ASINs (both DB and current run)
