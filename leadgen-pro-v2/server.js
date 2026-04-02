@@ -933,6 +933,26 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
 
   saveLog('info', `🔍 ${authorName}...`);
 
+  // ── HUNTER FIRST: Try Hunter email finder with common author domains ──
+  // Zero Bright Data calls needed — just Hunter API
+  if (HUNTER_API_KEY) {
+    const tryDomains = [
+      `${firstName}${lastName}.com`,
+      `${firstName}${lastName}author.com`,
+      `${nameSlug}.com`,
+    ];
+    const hunterResults = await Promise.all(tryDomains.map(domain =>
+      axios.get(`https://api.hunter.io/v2/email-finder?domain=${domain}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`, { timeout: 6000 })
+        .then(r => ({ email: r.data?.data?.email, score: r.data?.data?.score || 0, domain }))
+        .catch(() => null)
+    ));
+    const hunterHit = hunterResults.find(r => r?.email && r.score >= 30);
+    if (hunterHit) {
+      saveLog('success', `📧 Hunter first: ${hunterHit.email} (${hunterHit.score}%)`);
+      return { email: hunterHit.email, website: `https://${hunterHit.domain}` };
+    }
+  }
+
   // ── FAST PATH: Guess author's domain — all 3 in parallel ──────────────
   const guessDomains = [
     `${firstName}${lastName}.com`,
@@ -1220,10 +1240,10 @@ app.post('/api/amazon', async (req, res) => {
             }
           }
 
-          const pageBatch = [page_num, page_num+1].filter(p => p <= maxPages);
+          const pageBatch = [page_num, page_num+1, page_num+2].filter(p => p <= maxPages);
           saveLog(jobId, 'info', `📄 Category ${urlIndex+1}/${AMAZON_CATEGORY_NODES.length} — pages ${pageBatch.join(',')}...`);
           const batchResults = await Promise.all(pageBatch.map(p => scrapeOnePage(p)));
-          page_num += 2;
+          page_num += 3;
           const pageBooks = batchResults.flat();
           saveLog(jobId, 'info', `📚 Got ${pageBooks.length} books from ${pageBatch.length} pages`);
           if (pageBooks.length === 0) { consecutiveEmpty++; if(consecutiveEmpty>=3) { page_num = maxPages + 1; } continue; }
