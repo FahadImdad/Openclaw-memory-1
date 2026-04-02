@@ -951,12 +951,13 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
       if (!html) continue;
       const sites = extractRealWebsites(html);
       // Only accept sites that contain the author's name in the domain
+      // Must contain author's name in domain — no fallback to random sites
       const authorSite = sites.find(s => {
         try {
           const host = new URL(s).hostname.toLowerCase().replace(/^www\./, '');
           return nameParts.some(part => host.includes(part));
         } catch { return false; }
-      }) || sites[0]; // fallback to first real site if none contain name
+      });
       if (authorSite) { foundWebsite = authorSite; break; }
     } catch(e) {}
   }
@@ -1356,11 +1357,23 @@ app.post('/api/amazon', async (req, res) => {
             let emailVerified = false;
             let emailStatus = null;
             if (email) {
-              saveLog(jobId, 'hunter', `📧 HUNTER.IO: Verifying ${email}...`);
-              const verification = await verifyEmail(email);
-              emailVerified = verification.valid;
-              emailStatus = verification.status;
-              saveLog(jobId, emailVerified ? 'success' : 'warning', `${emailVerified ? '✅' : '⚠️'} HUNTER.IO: ${emailStatus || 'unverified'}`);
+              const emailDomain = (email.split('@')[1] || '').toLowerCase().replace(/^www\./, '');
+              const authorNameParts = author.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(p=>p.length>2);
+              const emailOnAuthorDomain = authorNameParts.some(part => emailDomain.includes(part));
+
+              if (emailOnAuthorDomain) {
+                // Email is on author's own domain (e.g. productinfo@howardpartridge.com)
+                // Auto-accept — no need to Hunter verify, it's definitely their domain
+                emailVerified = true;
+                emailStatus = 'author_domain';
+                saveLog(jobId, 'success', `✅ AUTO-ACCEPTED: email on author's own domain (${emailDomain})`);
+              } else {
+                saveLog(jobId, 'hunter', `📧 HUNTER.IO: Verifying ${email}...`);
+                const verification = await verifyEmail(email);
+                emailVerified = verification.valid;
+                emailStatus = verification.status;
+                saveLog(jobId, emailVerified ? 'success' : 'warning', `${emailVerified ? '✅' : '⚠️'} HUNTER.IO: ${emailStatus || 'unverified'}`);
+              }
             }
 
             // Website check
