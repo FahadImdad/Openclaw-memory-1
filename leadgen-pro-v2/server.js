@@ -1412,11 +1412,28 @@ app.post('/api/amazon', async (req, res) => {
                 emailConfidence = 'high';
                 saveLog(jobId, 'success', `✅ HIGH: email on author domain (${emailDomain})`);
               } else if (isGenericDomain && localHasAuthorName) {
-                // e.g. howardpartridge@gmail.com — name in local part, medium confidence
+                // e.g. howardpartridge@gmail.com — name matches, but verify against author's website
                 emailVerified = true;
                 emailStatus = 'name_match';
-                emailConfidence = 'medium';
-                saveLog(jobId, 'success', `🟡 MEDIUM: Gmail/Yahoo with author name (${email})`);
+                emailConfidence = 'medium'; // default medium
+
+                // Try to confirm: check if this email is mentioned on the author's website
+                if (website) {
+                  try {
+                    const siteHtml = await scrapeWithBrightData(website);
+                    if (siteHtml && siteHtml.toLowerCase().includes(email.toLowerCase())) {
+                      emailConfidence = 'high';
+                      emailStatus = 'website_confirmed';
+                      saveLog(jobId, 'success', `✅ HIGH: Gmail confirmed on author website (${email})`);
+                    } else {
+                      saveLog(jobId, 'success', `🟡 MEDIUM: Gmail/Yahoo name match, not on website (${email})`);
+                    }
+                  } catch(e) {
+                    saveLog(jobId, 'success', `🟡 MEDIUM: Gmail/Yahoo name match (${email})`);
+                  }
+                } else {
+                  saveLog(jobId, 'success', `🟡 MEDIUM: Gmail/Yahoo name match (${email})`);
+                }
               } else {
                 // Unknown email — run Hunter to verify
                 saveLog(jobId, 'hunter', `📧 HUNTER.IO: Verifying ${email}...`);
