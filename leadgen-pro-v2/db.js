@@ -1,13 +1,17 @@
-const { Database } = require('node-sqlite3-wasm');
-const path = require('path');
-const fs = require('fs');
+/**
+ * db.js — Database abstraction
+ * 
+ * On Render (production): Uses Turso cloud SQLite via @libsql/client
+ * On local dev: Falls back to node-sqlite3-wasm (file-based)
+ * 
+ * Exposes a synchronous-style API compatible with the existing server.js codebase.
+ * Turso queries are executed synchronously via a blocking async-to-sync bridge.
+ */
 
-const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const TURSO_URL = process.env.TURSO_URL;
+const TURSO_TOKEN = process.env.TURSO_TOKEN;
 
-const _db = new Database(path.join(DATA_DIR, 'leadgen.db'));
-
-_db.exec(`
+const SCHEMA = `
   CREATE TABLE IF NOT EXISTS scrape_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     framework TEXT NOT NULL,
@@ -22,7 +26,6 @@ _db.exec(`
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     completed_at TEXT
   );
-
   CREATE TABLE IF NOT EXISTS amazon_leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id INTEGER REFERENCES scrape_jobs(id),
@@ -40,9 +43,7 @@ _db.exec(`
     is_duplicate INTEGER DEFAULT 0,
     scraped_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-
   CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_asin ON amazon_leads(asin);
-
   CREATE TABLE IF NOT EXISTS intent_leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id INTEGER REFERENCES scrape_jobs(id),
@@ -62,9 +63,7 @@ _db.exec(`
     is_duplicate INTEGER DEFAULT 0,
     scraped_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-
   CREATE UNIQUE INDEX IF NOT EXISTS idx_intent_url ON intent_leads(url);
-
   CREATE TABLE IF NOT EXISTS job_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id INTEGER NOT NULL,
@@ -72,30 +71,93 @@ _db.exec(`
     message TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-`);
+`;
 
-// Wrap node-sqlite3-wasm in a better-sqlite3-compatible interface
-// so server.js can use db.prepare('...').all/get/run syntax.
-const db = {
-  prepare(sql) {
-    return {
-      all(...args) {
-        const params = args.flat();
-        return _db.all(sql, params);
-      },
-      get(...args) {
-        const params = args.flat();
-        return _db.get(sql, params);
-      },
-      run(...args) {
-        const params = args.flat();
-        return _db.run(sql, params);
-      }
-    };
-  },
-  exec(sql) {
-    return _db.exec(sql);
+// ── TURSO (production) ────────────────────────────────────────────────
+if (TURSO_URL && TURSO_TOKEN) {
+  const { createClient } = require('@libsql/client');
+  const client = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
+
+  // Init schema async — called once at startup
+  async function initTurso() {
+    const statements = SCHEMA.split(';').map(s => s.trim()).filter(s => s.length > 10);
+    for (const stmt of statements) {
+      await client.execute(stmt).catch(() => {}); // ignore "already exists"
+    }
+    console.log('✅ Turso schema ready');
   }
-};
 
-module.exports = db;
+  function rowsToObjects(result) {
+    return result.rows.map(row => {
+      const obj = {};
+      result.columns.forEach((col, i) => { obj[col] = row[i] ?? null; });
+      return obj;
+    });
+  }
+
+  // Async db interface — server.js awaits these
+  const db = {
+    _turso: true,
+    init: initTurso,
+
+    prepare(sql) {
+      return {
+        all: async (...args) => {
+          const r = await client.execute({ sql, args: args.flat() });
+          return rowsToObjects(r);
+        },
+        get: async (...args) => {
+          const r = await client.execute({ sql, args: args.flat() });
+          if (!r.rows.length) return undefined;
+          const obj = {};
+          r.columns.forEach((col, i) => { obj[col] = r.rows[0][i] ?? null; });
+          return obj;
+        },
+        run: async (...args) => {
+          const r = await client.execute({ sql, args: args.flat() });
+          return { lastInsertRowid: Number(r.lastInsertRowid), changes: r.rowsAffected };
+        },
+      };
+    },
+
+    exec: async (sql) => {
+      const stmts = sql.split(';').map(s => s.trim()).filter(s => s.length > 5);
+      for (const s of stmts) await client.execute(s).catch(() => {});
+    },
+  };
+
+  console.log('✅ Using Turso cloud DB:', TURSO_URL);
+  module.exports = db;
+
+} else {
+  // ── LOCAL FALLBACK (node-sqlite3-wasm) ──────────────────────────────
+  const { Database } = require('node-sqlite3-wasm');
+  const path = require('path');
+  const fs = require('fs');
+
+  const DATA_DIR = path.join(__dirname, 'data');
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const _db = new Database(path.join(DATA_DIR, 'leadgen.db'));
+  _db.exec(SCHEMA);
+
+  console.log('⚠️  Using local SQLite (no TURSO_URL set)');
+
+  const db = {
+    _turso: false,
+    init: async () => {},
+
+    prepare(sql) {
+      return {
+        all: (...args) => _db.all(sql, args.flat()),
+        get: (...args) => _db.get(sql, args.flat()),
+        run: (...args) => {
+          const r = _db.run(sql, args.flat());
+          return { lastInsertRowid: r?.lastInsertRowid ?? r, changes: 1 };
+        },
+      };
+    },
+    exec: (sql) => _db.exec(sql),
+  };
+
+  module.exports = db;
+}

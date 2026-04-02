@@ -8,12 +8,6 @@ require('dotenv').config();
 
 const db = require('./db');
 
-// Mark any stale running jobs as error on startup
-try {
-  db.exec("UPDATE scrape_jobs SET status='error', completed_at=CURRENT_TIMESTAMP WHERE status='running'");
-  console.log('✅ Cleaned up stale running jobs');
-} catch(e) {}
-
 const BUILD_TIME = new Date().toISOString();
 
 const app = express();
@@ -60,7 +54,7 @@ const CRAIGSLIST_CITIES = [
 
 // Save a log entry to the job_logs table
 function saveLog(jobId, level, message) {
-  db.prepare('INSERT INTO job_logs (job_id, level, message) VALUES (?, ?, ?)').run(jobId, level, message);
+  await db.prepare('INSERT INTO job_logs (job_id, level, message) VALUES (?, ?, ?)').run(jobId, level, message);
 }
 
 // Scrape URL using Bright Data Web Unlocker (for simple requests like Reddit JSON)
@@ -1049,7 +1043,7 @@ app.get('/api/ping', (req, res) => res.json({ ok: true, time: Date.now() }));
 
 // GET /api/jobs — list all scrape jobs
 app.get('/api/jobs', (req, res) => {
-  const jobs = db.prepare('SELECT * FROM scrape_jobs ORDER BY created_at DESC').all();
+  const jobs = await db.prepare('SELECT * FROM scrape_jobs ORDER BY created_at DESC').all();
   res.json(jobs);
 });
 
@@ -1060,9 +1054,9 @@ app.get('/api/jobs/:jobId/leads', (req, res) => {
   let leads;
   if (framework === 'amazon') {
     // Return verified leads first, then website-only leads (no email but has website)
-    leads = db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? AND is_duplicate = 0 AND (email_verified = 1 OR (email IS NULL AND website IS NOT NULL)) ORDER BY email_verified DESC, id`).all(jobId);
+    leads = await db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? AND is_duplicate = 0 AND (email_verified = 1 OR (email IS NULL AND website IS NOT NULL)) ORDER BY email_verified DESC, id`).all(jobId);
   } else {
-    leads = db.prepare('SELECT * FROM intent_leads WHERE job_id = ? AND email_verified = 1 AND is_duplicate = 0 ORDER BY id').all(jobId);
+    leads = await db.prepare('SELECT * FROM intent_leads WHERE job_id = ? AND email_verified = 1 AND is_duplicate = 0 ORDER BY id').all(jobId);
   }
   res.json(leads);
 });
@@ -1071,41 +1065,41 @@ app.get('/api/jobs/:jobId/leads', (req, res) => {
 app.get('/api/jobs/:jobId/logs', (req, res) => {
   const { jobId } = req.params;
   const since = parseInt(req.query.since || '0');
-  const logs = db.prepare('SELECT * FROM job_logs WHERE job_id = ? AND id > ? ORDER BY id ASC LIMIT 100').all(jobId, since);
-  const job = db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
+  const logs = await db.prepare('SELECT * FROM job_logs WHERE job_id = ? AND id > ? ORDER BY id ASC LIMIT 100').all(jobId, since);
+  const job = await db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
   res.json({ logs, job });
 });
 
 // POST /api/jobs/:jobId/pause
 app.post('/api/jobs/:jobId/pause', (req, res) => {
   const { jobId } = req.params;
-  db.prepare('UPDATE scrape_jobs SET is_paused=1 WHERE id=?').run(jobId);
+  await db.prepare('UPDATE scrape_jobs SET is_paused=1 WHERE id=?').run(jobId);
   res.json({ ok: true });
 });
 
 // POST /api/jobs/:jobId/resume
 app.post('/api/jobs/:jobId/resume', (req, res) => {
   const { jobId } = req.params;
-  db.prepare('UPDATE scrape_jobs SET is_paused=0 WHERE id=?').run(jobId);
+  await db.prepare('UPDATE scrape_jobs SET is_paused=0 WHERE id=?').run(jobId);
   res.json({ ok: true });
 });
 
 // POST /api/jobs/:jobId/cancel
 app.post('/api/jobs/:jobId/cancel', (req, res) => {
   const { jobId } = req.params;
-  db.prepare("UPDATE scrape_jobs SET status='cancelled', is_paused=0 WHERE id=?").run(jobId);
+  await db.prepare("UPDATE scrape_jobs SET status='cancelled', is_paused=0 WHERE id=?").run(jobId);
   res.json({ ok: true });
 });
 
 // DELETE /api/jobs/:jobId — delete a job and its leads
 app.delete('/api/jobs/:jobId', (req, res) => {
   const { jobId } = req.params;
-  const job = db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
+  const job = await db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
-  db.prepare('DELETE FROM amazon_leads WHERE job_id = ?').run(jobId);
-  db.prepare('DELETE FROM intent_leads WHERE job_id = ?').run(jobId);
-  db.prepare('DELETE FROM job_logs WHERE job_id = ?').run(jobId);
-  db.prepare('DELETE FROM scrape_jobs WHERE id = ?').run(jobId);
+  await db.prepare('DELETE FROM amazon_leads WHERE job_id = ?').run(jobId);
+  await db.prepare('DELETE FROM intent_leads WHERE job_id = ?').run(jobId);
+  await db.prepare('DELETE FROM job_logs WHERE job_id = ?').run(jobId);
+  await db.prepare('DELETE FROM scrape_jobs WHERE id = ?').run(jobId);
   res.json({ success: true, deleted: jobId });
 });
 
@@ -1115,16 +1109,16 @@ app.get('/api/export/:jobId', (req, res) => {
   const { framework = 'amazon', verifiedOnly = 'true' } = req.query;
   // verifiedOnly=true: show verified email leads + website-only leads (both useful)
   const verifiedFilter = verifiedOnly === 'true' ? `AND is_duplicate = 0 AND (email_verified = 1 OR (email IS NULL AND website IS NOT NULL))` : '';
-  const job = db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
+  const job = await db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
   let leads, headers, rows;
   if (framework === 'amazon') {
-    leads = db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
+    leads = await db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
     headers = ['#','Author','Book Title','Published','Reviews','Email','Email Status','Website','Amazon URL','Scraped At'];
     rows = leads.map((l,i) => [i+1, l.author, l.book_title, l.publish_date||'', l.review_count||0, l.email||'', l.email_status||'', l.website||'', l.amazon_url, l.scraped_at]);
   } else {
-    leads = db.prepare(`SELECT * FROM intent_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
+    leads = await db.prepare(`SELECT * FROM intent_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
     headers = ['#','Name','Title','Email','Email Status','Phone','WhatsApp','Budget','City','Source','URL','Posted Date','Scraped At'];
     rows = leads.map((l,i) => [i+1, l.name||'', l.title||'', l.email||'', l.email_status||'', l.phone||'', l.whatsapp||'', l.budget||'', l.city||'', l.source||'', l.url, l.posted_date||'', l.scraped_at]);
   }
@@ -1155,10 +1149,10 @@ app.get('/api/health', (req, res) => {
 
 // GET /api/stats — dashboard summary
 app.get('/api/stats', (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as c FROM amazon_leads').get()?.c || 0;
-  const verified = db.prepare('SELECT COUNT(*) as c FROM amazon_leads WHERE email_verified=1').get()?.c || 0;
-  const websites = db.prepare('SELECT COUNT(*) as c FROM amazon_leads WHERE website IS NOT NULL').get()?.c || 0;
-  const jobs = db.prepare('SELECT COUNT(*) as c FROM scrape_jobs').get()?.c || 0;
+  const total = await db.prepare('SELECT COUNT(*) as c FROM amazon_leads').get()?.c || 0;
+  const verified = await db.prepare('SELECT COUNT(*) as c FROM amazon_leads WHERE email_verified=1').get()?.c || 0;
+  const websites = await db.prepare('SELECT COUNT(*) as c FROM amazon_leads WHERE website IS NOT NULL').get()?.c || 0;
+  const jobs = await db.prepare('SELECT COUNT(*) as c FROM scrape_jobs').get()?.c || 0;
   res.json({ total, verified, websites, jobs });
 });
 
@@ -1204,13 +1198,13 @@ app.post('/api/amazon', async (req, res) => {
   console.log(`[${new Date().toISOString()}] Amazon search: dateFrom=${dateFrom}, dateTo=${dateTo}, targetLeads=${targetLeads}`);
 
   // Prevent duplicate jobs — if one is already running, return that job
-  const existingJob = db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'amazon' AND status = 'running'`).get();
+  const existingJob = await db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'amazon' AND status = 'running'`).get();
   if (existingJob) {
     return res.json({ jobId: existingJob.id, alreadyRunning: true });
   }
 
   // Create scrape job in DB
-  const jobResult = db.prepare(
+  const jobResult = await db.prepare(
     `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
      VALUES ('amazon', ?, ?, ?, ?, 'running')`
   ).run(dateFrom, dateTo, keyword || null, targetLeads);
@@ -1294,7 +1288,7 @@ app.post('/api/amazon', async (req, res) => {
           // Filter out already-seen ASINs (both DB and current run)
           const newBooks = pageBooks.filter(book => {
             if (seenAsinsThisRun.has(book.asin)) return false;
-            const exists = db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(book.asin);
+            const exists = await db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(book.asin);
             if (exists) { seenAsinsThisRun.add(book.asin); return false; }
             seenAsinsThisRun.add(book.asin);
             return true;
@@ -1331,9 +1325,9 @@ app.post('/api/amazon', async (req, res) => {
           async function processBook(book) {
             if (verifiedCount >= targetLeads) return;
 
-            const jobStatus = db.prepare('SELECT status, is_paused FROM scrape_jobs WHERE id=?').get(jobId);
+            const jobStatus = await db.prepare('SELECT status, is_paused FROM scrape_jobs WHERE id=?').get(jobId);
             if (jobStatus?.status === 'cancelled') return;
-            while (jobStatus && db.prepare('SELECT is_paused FROM scrape_jobs WHERE id=?').get(jobId)?.is_paused) {
+            while (jobStatus && await db.prepare('SELECT is_paused FROM scrape_jobs WHERE id=?').get(jobId)?.is_paused) {
               await new Promise(r => setTimeout(r, 3000));
             }
 
@@ -1374,14 +1368,14 @@ app.post('/api/amazon', async (req, res) => {
             }
 
             // ASIN dedup — skip entirely if already in DB
-            const asinExists = db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(asin);
+            const asinExists = await db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(asin);
             if (asinExists) {
               saveLog(jobId, 'info', `⏭️ SKIP (seen ASIN): ${asin}`);
               return;
             }
 
             // Author dedup — skip if we already found this author in any job
-            const authorExists = db.prepare('SELECT id FROM amazon_leads WHERE author = ? AND email IS NOT NULL').get(author);
+            const authorExists = await db.prepare('SELECT id FROM amazon_leads WHERE author = ? AND email IS NOT NULL').get(author);
             if (authorExists) {
               saveLog(jobId, 'info', `⏭️ SKIP (author already processed): ${author}`);
               return;
@@ -1457,7 +1451,7 @@ app.post('/api/amazon', async (req, res) => {
             // Check for cross-job email duplicate
             let isDuplicate = 0;
             if (email && emailVerified) {
-              const emailExists = db.prepare('SELECT id FROM amazon_leads WHERE email = ? AND job_id != ?').get(email, jobId);
+              const emailExists = await db.prepare('SELECT id FROM amazon_leads WHERE email = ? AND job_id != ?').get(email, jobId);
               if (emailExists) {
                 isDuplicate = 1;
                 saveLog(jobId, 'warning', `♻️ DUPLICATE email: ${email}`);
@@ -1467,7 +1461,7 @@ app.post('/api/amazon', async (req, res) => {
             // Save to DB — both verified email leads AND website-only leads
             totalCount++;
             try {
-              db.prepare(
+              await db.prepare(
                 `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
               ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, emailConfidence || null, hasRealWebsite ? website : null, amazonUrl, asin, isDuplicate);
@@ -1480,14 +1474,14 @@ app.post('/api/amazon', async (req, res) => {
             if (emailVerified && isDuplicate === 0) {
               // Fully verified lead — counts toward target
               verifiedCount++;
-              db.prepare('UPDATE scrape_jobs SET verified_count = ?, total_count = ? WHERE id = ?').run(verifiedCount, totalCount, jobId);
+              await db.prepare('UPDATE scrape_jobs SET verified_count = ?, total_count = ? WHERE id = ?').run(verifiedCount, totalCount, jobId);
               saveLog(jobId, 'success', `✅ VERIFIED #${verifiedCount}: ${author} | ${email}`);
             } else if (!email && hasRealWebsite) {
               // Website-only lead — useful but not counted toward target
-              db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
+              await db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
               saveLog(jobId, 'info', `🌐 WEBSITE-ONLY: ${author} | ${website}`);
             } else {
-              db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
+              await db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
               const reason = isDuplicate ? 'duplicate email' : 'unverified email';
               saveLog(jobId, 'info', `📝 Saved (${reason}): ${author}`);
             }
@@ -1501,7 +1495,7 @@ app.post('/api/amazon', async (req, res) => {
       }
 
       // Mark job complete
-      db.prepare(
+      await db.prepare(
         `UPDATE scrape_jobs SET status = 'complete', verified_count = ?, total_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`
       ).run(verifiedCount, totalCount, jobId);
 
@@ -1510,7 +1504,7 @@ app.post('/api/amazon', async (req, res) => {
     } catch (fatalErr) {
       console.error('Amazon background fatal:', fatalErr);
       try {
-        db.prepare(`UPDATE scrape_jobs SET status = 'error', completed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(jobId);
+        await db.prepare(`UPDATE scrape_jobs SET status = 'error', completed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(jobId);
         saveLog(jobId, 'error', `❌ Fatal background error: ${fatalErr.message}`);
       } catch(e) {}
     }
@@ -1530,13 +1524,13 @@ app.post('/api/search', async (req, res) => {
   console.log(`[${new Date().toISOString()}] Search: "${keyword}" | ${dateFrom} → ${dateTo} | target: ${targetLeads}`);
 
   // Prevent duplicate jobs — if one is already running, return that job
-  const existingIntentJob = db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'intent' AND status = 'running'`).get();
+  const existingIntentJob = await db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'intent' AND status = 'running'`).get();
   if (existingIntentJob) {
     return res.json({ jobId: existingIntentJob.id, alreadyRunning: true });
   }
 
   // Create scrape job
-  const jobResult = db.prepare(
+  const jobResult = await db.prepare(
     `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
      VALUES ('intent', ?, ?, ?, ?, 'running')`
   ).run(dateFrom, dateTo, keyword || null, targetLeads);
@@ -1574,7 +1568,7 @@ app.post('/api/search', async (req, res) => {
       async function processLeadPosts(posts, framework) {
         for (const post of posts) {
           if (verifiedCount >= targetLeads) break;
-          const urlExists = db.prepare('SELECT id FROM intent_leads WHERE url = ?').get(post.url);
+          const urlExists = await db.prepare('SELECT id FROM intent_leads WHERE url = ?').get(post.url);
           if (urlExists) continue;
 
           const contacts = await extractContactsWithAI(post.body, post.title);
@@ -1591,21 +1585,21 @@ app.post('/api/search', async (req, res) => {
 
           let isDuplicate = 0;
           if (contacts.email && emailVerified) {
-            const emailExists = db.prepare('SELECT id FROM intent_leads WHERE email = ? AND job_id != ?').get(contacts.email, jobId);
+            const emailExists = await db.prepare('SELECT id FROM intent_leads WHERE email = ? AND job_id != ?').get(contacts.email, jobId);
             if (emailExists) isDuplicate = 1;
           }
 
           totalCount++;
           try {
-            db.prepare(`INSERT INTO intent_leads (job_id,name,title,description,email,email_verified,email_status,phone,whatsapp,budget,city,source,url,posted_date,is_duplicate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+            await db.prepare(`INSERT INTO intent_leads (job_id,name,title,description,email,email_verified,email_status,phone,whatsapp,budget,city,source,url,posted_date,is_duplicate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
               .run(jobId, contacts.name||post.author||'Unknown', post.title, contacts.description||post.title.substring(0,100), contacts.email||null, emailVerified?1:0, emailStatus, contacts.phone||null, contacts.whatsapp||null, contacts.budget||null, 'Remote', post.source, post.url, post.postedDate, isDuplicate);
           } catch(dbErr) { totalCount--; continue; }
 
-          db.prepare('UPDATE scrape_jobs SET total_count=? WHERE id=?').run(totalCount, jobId);
+          await db.prepare('UPDATE scrape_jobs SET total_count=? WHERE id=?').run(totalCount, jobId);
 
           if (emailVerified && isDuplicate === 0) {
             verifiedCount++;
-            db.prepare('UPDATE scrape_jobs SET verified_count=? WHERE id=?').run(verifiedCount, jobId);
+            await db.prepare('UPDATE scrape_jobs SET verified_count=? WHERE id=?').run(verifiedCount, jobId);
             saveLog(jobId, 'success', `✅ VERIFIED #${verifiedCount}: ${contacts.email} via ${post.source}`);
           }
           await new Promise(r => setTimeout(r, 300));
@@ -1762,7 +1756,7 @@ app.post('/api/search', async (req, res) => {
               if (verifiedCount >= targetLeads) break;
 
               // URL dedup
-              const urlExists = db.prepare('SELECT id FROM intent_leads WHERE url = ?').get(listing.url);
+              const urlExists = await db.prepare('SELECT id FROM intent_leads WHERE url = ?').get(listing.url);
               if (urlExists) {
                 saveLog(jobId, 'info', `⏭️ SKIP (seen): ${listing.url.substring(0, 60)}`);
                 continue;
@@ -1836,7 +1830,7 @@ app.post('/api/search', async (req, res) => {
               // Cross-job email dedup
               let isDuplicate = 0;
               if (contacts.email && emailVerified) {
-                const emailExists = db.prepare('SELECT id FROM intent_leads WHERE email = ? AND job_id != ?').get(contacts.email, jobId);
+                const emailExists = await db.prepare('SELECT id FROM intent_leads WHERE email = ? AND job_id != ?').get(contacts.email, jobId);
                 if (emailExists) {
                   isDuplicate = 1;
                   saveLog(jobId, 'warning', `♻️ DUPLICATE email: ${contacts.email}`);
@@ -1845,7 +1839,7 @@ app.post('/api/search', async (req, res) => {
 
               // Save to DB
               try {
-                db.prepare(
+                await db.prepare(
                   `INSERT INTO intent_leads (job_id, name, title, description, email, email_verified, email_status, phone, whatsapp, budget, city, source, url, posted_date, is_duplicate)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
                 ).run(
@@ -1867,12 +1861,12 @@ app.post('/api/search', async (req, res) => {
                 continue;
               }
 
-              db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
+              await db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
 
               // Count + emit only verified non-duplicate leads
               if (emailVerified && isDuplicate === 0) {
                 verifiedCount++;
-                db.prepare('UPDATE scrape_jobs SET verified_count = ? WHERE id = ?').run(verifiedCount, jobId);
+                await db.prepare('UPDATE scrape_jobs SET verified_count = ? WHERE id = ?').run(verifiedCount, jobId);
                 saveLog(jobId, 'success', `✅ VERIFIED LEAD #${verifiedCount}: ${contacts.name || 'Craigslist Poster'} | ${contacts.email}`);
               }
 
@@ -1889,7 +1883,7 @@ app.post('/api/search', async (req, res) => {
       }
 
       // Mark job complete
-      db.prepare(
+      await db.prepare(
         `UPDATE scrape_jobs SET status = 'complete', verified_count = ?, total_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`
       ).run(verifiedCount, totalCount, jobId);
 
@@ -1898,7 +1892,7 @@ app.post('/api/search', async (req, res) => {
     } catch (fatalErr) {
       console.error('Search background fatal:', fatalErr);
       try {
-        db.prepare(`UPDATE scrape_jobs SET status = 'error', completed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(jobId);
+        await db.prepare(`UPDATE scrape_jobs SET status = 'error', completed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(jobId);
         saveLog(jobId, 'error', `❌ Fatal background error: ${fatalErr.message}`);
       } catch(e) {}
     }
@@ -1907,7 +1901,19 @@ app.post('/api/search', async (req, res) => {
 
 // ============================================================
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 LeadGen Pro v2 running on port ${PORT}`);
-  console.log(`🔑 APIs: Bright Data ✅ | Hunter ✅ | Gemini ✅`);
-});
+
+// Async startup — init DB schema, clean stale jobs, then start server
+(async () => {
+  try {
+    await db.init();
+    await db.exec("UPDATE scrape_jobs SET status='error', completed_at=CURRENT_TIMESTAMP WHERE status='running'");
+    console.log('✅ Cleaned up stale running jobs');
+  } catch(e) {
+    console.log('⚠️ DB init warning:', e.message);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`🚀 LeadGen Pro v2 running on port ${PORT}`);
+    console.log(`🔑 APIs: Bright Data ✅ | Hunter ✅ | Gemini ✅`);
+  });
+})();
