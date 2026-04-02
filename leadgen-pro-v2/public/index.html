@@ -48,8 +48,8 @@
       <!-- Available Data Section -->
       <div id="availableData-intent" class="mb-6">
         <div class="flex justify-between items-center mb-3">
-          <h3 class="text-lg font-bold text-gray-300">📁 Available Data</h3>
-          <button onclick="showScrapeForm('intent')" class="text-sm text-blue-400 hover:text-blue-300">➕ New Scrape</button>
+          <h3 class="text-lg font-bold text-gray-300">📋 Tasks</h3>
+          <button onclick="showScrapeForm('intent')" class="text-sm text-blue-400 hover:text-blue-300">➕ New Task</button>
         </div>
         <div id="jobsList-intent">
           <div class="text-gray-500 text-sm">Loading...</div>
@@ -59,7 +59,7 @@
       <!-- Search Form (hidden by default if jobs exist) -->
       <div id="scrapeForm-intent" class="scrape-form bg-gray-800 rounded-lg p-6 mb-8">
         <div class="flex justify-between items-center mb-4">
-          <h3 class="text-base font-bold text-gray-300">🔍 New Scrape</h3>
+          <h3 class="text-base font-bold text-gray-300">🔍 New Task</h3>
           <button onclick="hideScrapeForm('intent')" id="closeFormBtn-intent" class="text-gray-500 hover:text-gray-300 text-sm hidden">✕ Close</button>
         </div>
 
@@ -313,8 +313,8 @@
       <!-- Available Data Section -->
       <div id="availableData-amazon" class="mb-6">
         <div class="flex justify-between items-center mb-3">
-          <h3 class="text-lg font-bold text-gray-300">📁 Available Data</h3>
-          <button onclick="showScrapeForm('amazon')" class="text-sm text-blue-400 hover:text-blue-300">➕ New Scrape</button>
+          <h3 class="text-lg font-bold text-gray-300">📋 Tasks</h3>
+          <button onclick="showScrapeForm('amazon')" class="text-sm text-blue-400 hover:text-blue-300">➕ New Task</button>
         </div>
         <div id="jobsList-amazon">
           <div class="text-gray-500 text-sm">Loading...</div>
@@ -324,7 +324,7 @@
       <!-- Amazon Scrape Form (hidden by default if jobs exist) -->
       <div id="scrapeForm-amazon" class="scrape-form bg-gray-800 rounded-lg p-6 mb-8">
         <div class="flex justify-between items-center mb-4">
-          <h3 class="text-base font-bold text-gray-300">🔍 New Scrape</h3>
+          <h3 class="text-base font-bold text-gray-300">🔍 New Task</h3>
           <button onclick="hideScrapeForm('amazon')" id="closeFormBtn-amazon" class="text-gray-500 hover:text-gray-300 text-sm hidden">✕ Close</button>
         </div>
 
@@ -460,7 +460,23 @@
       activeBtn.classList.add('bg-blue-600', 'text-white', 'border-blue-400');
     }
 
-    // ===================== JOBS LIST =====================
+    // ===================== TASK LIST =====================
+    const _minimized = {};
+
+    function statusBadge(job) {
+      if (job.status === 'complete') return '<span class="px-2 py-0.5 rounded-full text-xs bg-green-900 text-green-300">✅ Complete</span>';
+      if (job.status === 'cancelled') return '<span class="px-2 py-0.5 rounded-full text-xs bg-red-900 text-red-300">✕ Cancelled</span>';
+      if (job.status === 'error') return '<span class="px-2 py-0.5 rounded-full text-xs bg-red-900 text-red-300">❌ Error</span>';
+      if (job.is_paused) return '<span class="px-2 py-0.5 rounded-full text-xs bg-yellow-900 text-yellow-300">⏸ Paused</span>';
+      return '<span class="px-2 py-0.5 rounded-full text-xs bg-blue-900 text-blue-300 animate-pulse">🟢 Running</span>';
+    }
+
+    function progressBar(verified, target) {
+      const pct = target > 0 ? Math.min(100, Math.round((verified / target) * 100)) : 0;
+      const color = pct >= 100 ? 'bg-green-500' : 'bg-blue-500';
+      return `<div class="bg-gray-700 rounded-full h-1.5 mt-1"><div class="${color} h-1.5 rounded-full transition-all" style="width:${pct}%"></div></div>`;
+    }
+
     async function loadJobs(framework) {
       const res = await fetch('/api/jobs');
       const jobs = await res.json();
@@ -468,39 +484,79 @@
       const container = document.getElementById(`jobsList-${framework}`);
 
       if (filtered.length === 0) {
-        container.innerHTML = '<div class="text-gray-500 text-sm">No previous scrapes.</div>';
+        container.innerHTML = '<div class="text-gray-500 text-sm">No previous tasks.</div>';
         showScrapeForm(framework);
         return;
       }
 
-      container.innerHTML = filtered.map(job => `
-        <div class="bg-gray-700 rounded-lg p-3 mb-2 flex items-center justify-between" id="job-row-${job.id}">
-          <div class="flex-1 min-w-0 mr-3">
-            <span class="text-sm font-medium text-white">${job.date_from} → ${job.date_to}</span>
-            ${job.keyword ? `<span class="text-xs text-gray-400 ml-2">"${escapeHtml(job.keyword)}"</span>` : ''}
-            <div class="text-xs text-gray-400 mt-0.5">
-              ✅ ${job.verified_count} verified leads ·
-              📊 ${job.total_count} total ·
-              <span class="${job.status === 'complete' ? 'text-green-400' : job.status === 'error' ? 'text-red-400' : 'text-yellow-400'}">${job.status}</span>
+      container.innerHTML = filtered.map(job => {
+        const isRunning = job.status === 'running';
+        const isDone = job.status === 'complete' || job.status === 'cancelled' || job.status === 'error';
+        const minimized = _minimized[job.id] !== false && isDone; // done tasks minimized by default
+        const fw = job.framework === 'amazon' ? '📚 Amazon' : '📡 Intent';
+        return `
+        <div class="bg-gray-800 border border-gray-700 rounded-lg mb-3" id="task-card-${job.id}">
+          <!-- Task Header -->
+          <div class="flex items-center gap-3 px-4 py-3">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-bold text-gray-400">Task #${job.id}</span>
+                <span class="text-xs text-gray-500">${fw}</span>
+                ${job.keyword ? `<span class="text-xs text-gray-500">"${escapeHtml(job.keyword)}"</span>` : ''}
+                ${statusBadge(job)}
+              </div>
+              <div class="flex items-center gap-3 mt-1">
+                <span class="text-xs text-gray-400">✅ ${job.verified_count}/${job.target_leads} leads</span>
+                <span class="text-xs text-gray-600">📊 ${job.total_count} processed</span>
+                <span class="text-xs text-gray-600">${job.date_from} → ${job.date_to}</span>
+              </div>
+              ${progressBar(job.verified_count, job.target_leads)}
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <!-- Pause / Resume -->
+              ${isRunning && !job.is_paused ? `<button onclick="pauseTask(${job.id},'${framework}')" class="px-2 py-1 rounded bg-yellow-600 hover:bg-yellow-700 text-xs text-white" title="Pause">⏸</button>` : ''}
+              ${isRunning && job.is_paused ? `<button onclick="resumeTask(${job.id},'${framework}')" class="px-2 py-1 rounded bg-green-600 hover:bg-green-700 text-xs text-white" title="Resume">▶</button>` : ''}
+              <!-- Cancel -->
+              ${isRunning ? `<button onclick="cancelTask(${job.id},'${framework}')" class="px-2 py-1 rounded bg-red-700 hover:bg-red-800 text-xs text-white" title="Cancel">✕</button>` : ''}
+              <!-- View / Download -->
+              <button onclick="viewJob(${job.id},'${framework}')" class="px-2 py-1 rounded bg-blue-700 hover:bg-blue-800 text-xs text-white">👁</button>
+              <a href="/api/export/${job.id}?framework=${framework}&verifiedOnly=true" class="px-2 py-1 rounded bg-green-700 hover:bg-green-800 text-xs text-white">📥</a>
+              <!-- Minimize / Maximize -->
+              <button onclick="toggleTask(${job.id})" class="px-2 py-1 rounded bg-gray-600 hover:bg-gray-500 text-xs text-white" id="toggle-btn-${job.id}">${minimized ? '▲' : '▼'}</button>
+              <!-- Delete -->
+              <button onclick="deleteJob(${job.id},'${framework}')" class="px-2 py-1 rounded bg-gray-600 hover:bg-red-700 text-xs text-white" title="Delete">🗑</button>
             </div>
           </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <button onclick="viewJob(${job.id}, '${framework}')"
-                    class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-sm rounded text-white whitespace-nowrap">
-              👁 View
-            </button>
-            <a href="/api/export/${job.id}?framework=${framework}&verifiedOnly=true"
-               class="px-3 py-1 bg-green-600 hover:bg-green-700 text-sm rounded text-white whitespace-nowrap">
-              📥 Download
-            </a>
-            <button onclick="deleteJob(${job.id}, '${framework}')"
-                    class="w-7 h-7 flex items-center justify-center rounded bg-gray-600 hover:bg-red-600 text-gray-300 hover:text-white transition text-sm"
-                    title="Delete this job">
-              ✕
-            </button>
-          </div>
-        </div>
-      `).join('');
+        </div>`;
+      }).join('');
+    }
+
+    function toggleTask(jobId) {
+      _minimized[jobId] = !(_minimized[jobId] === false);
+      const btn = document.getElementById(`toggle-btn-${jobId}`);
+      // For now just toggle display of expanded view if it exists
+      const expanded = document.getElementById(`task-expanded-${jobId}`);
+      if (expanded) {
+        const hidden = expanded.style.display === 'none';
+        expanded.style.display = hidden ? 'block' : 'none';
+        btn.textContent = hidden ? '▼' : '▲';
+      }
+    }
+
+    async function pauseTask(jobId, framework) {
+      await fetch(`/api/jobs/${jobId}/pause`, { method: 'POST' });
+      loadJobs(framework);
+    }
+
+    async function resumeTask(jobId, framework) {
+      await fetch(`/api/jobs/${jobId}/resume`, { method: 'POST' });
+      loadJobs(framework);
+    }
+
+    async function cancelTask(jobId, framework) {
+      if (!confirm('Cancel this task?')) return;
+      await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+      loadJobs(framework);
     }
 
     function viewJob(jobId, framework) {
@@ -514,14 +570,14 @@
     }
 
     async function deleteJob(jobId, framework) {
-      if (!confirm(`Delete this scrape job and all its leads? This cannot be undone.`)) return;
+      if (!confirm(`Delete this task and all its leads? Cannot be undone.`)) return;
       try {
         const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.success) {
-          const row = document.getElementById(`job-row-${jobId}`);
+          const row = document.getElementById(`task-card-${jobId}`);
           if (row) row.remove();
-          // If no rows left, reload to show "no scrapes" state
+          // If no rows left, reload to show "no tasks" state
           const container = document.getElementById(`jobsList-${framework}`);
           if (container && !container.querySelector('[id^="job-row-"]')) {
             loadJobs(framework);
@@ -1073,6 +1129,19 @@
       loadJobs('intent');
       loadJobs('amazon');
       loadVersion();
+
+      // Auto-refresh task list every 5s to show live status/progress
+      setInterval(async () => {
+        try {
+          const res = await fetch('/api/jobs');
+          const jobs = await res.json();
+          const hasRunning = jobs.some(j => j.status === 'running');
+          if (hasRunning) {
+            loadJobs('intent');
+            loadJobs('amazon');
+          }
+        } catch(e) {}
+      }, 5000);
     });
   </script>
 </body>
