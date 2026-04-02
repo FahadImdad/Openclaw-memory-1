@@ -780,10 +780,22 @@
           const res = await fetch(`/api/jobs/${jobId}/logs?since=${lastLogId}`);
           const data = await res.json();
 
-          // Add new logs to console
+          // Add new logs to console + inline task card log
           for (const log of data.logs) {
             addLog(log.message, levelToColor(log.level), framework);
             lastLogId = log.id;
+            // Update inline card log if expanded
+            const inlineLog = document.getElementById(`task-log-${jobId}`);
+            if (inlineLog && inlineLog.children.length > 0 && inlineLog.children[0].textContent !== 'Loading logs...') {
+              const colors = {success:'text-green-400',error:'text-red-400',warning:'text-yellow-400',info:'text-gray-300',hunter:'text-blue-400',brightdata:'text-cyan-400'};
+              const div = document.createElement('div');
+              div.className = colors[log.level] || 'text-gray-400';
+              div.textContent = `[${new Date().toLocaleTimeString()}] ${log.message}`;
+              inlineLog.appendChild(div);
+              inlineLog.scrollTop = inlineLog.scrollHeight;
+              // Keep max 100 entries
+              while (inlineLog.children.length > 100) inlineLog.removeChild(inlineLog.firstChild);
+            }
 
             // Update stats counters from log messages
             if (framework === 'intent') {
@@ -823,7 +835,15 @@
                 window._lastAmazonVerified = verified;
                 document.getElementById('amazonExportBar').classList.remove('hidden');
                 clearTimeout(window._amazonLoadTimer);
-                window._amazonLoadTimer = setTimeout(() => loadAmazonLeadsFromJob(data.job.id), 1000);
+                window._amazonLoadTimer = setTimeout(() => {
+                  loadAmazonLeadsFromJob(data.job.id);
+                  // Also refresh inline task card table if expanded
+                  const card = document.getElementById(`task-card-${data.job.id}`);
+                  const detail = document.getElementById(`task-detail-${data.job.id}`);
+                  if (detail && detail.style.display !== 'none') {
+                    loadTaskCardContent(data.job.id, data.job.framework || 'amazon', data.job.framework || 'amazon');
+                  }
+                }, 1000);
               }
             }
 
