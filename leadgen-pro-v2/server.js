@@ -1340,14 +1340,21 @@ app.post('/api/amazon', async (req, res) => {
               return;
             }
 
-            // Future date filter — skip pre-order books (not published yet)
+            // Date range filter — only process books published within the user's selected range
             if (book.publishDate) {
               const pubDate = new Date(book.publishDate);
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              if (!isNaN(pubDate.getTime()) && pubDate > today) {
-                saveLog(jobId, 'info', `⏭️ SKIP (future book, publishes ${book.publishDate}): ${title.substring(0, 50)}`);
-                return;
+              const fromDate = new Date(dateFrom);
+              const toDate = new Date(dateTo);
+              toDate.setHours(23, 59, 59, 999); // inclusive end
+              if (!isNaN(pubDate.getTime())) {
+                if (pubDate < fromDate) {
+                  saveLog(jobId, 'info', `⏭️ SKIP (published ${book.publishDate} — before range): ${title.substring(0, 50)}`);
+                  return;
+                }
+                if (pubDate > toDate) {
+                  saveLog(jobId, 'info', `⏭️ SKIP (published ${book.publishDate} — after range / pre-order): ${title.substring(0, 50)}`);
+                  return;
+                }
               }
             }
 
