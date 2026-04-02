@@ -986,7 +986,8 @@
 
       const row = document.createElement('tr');
       const isEven = table.children.length % 2 === 0;
-      row.className = `border-t border-gray-700/50 ${isEven ? 'bg-gray-800' : 'bg-gray-750'} hover:bg-gray-700 transition-colors`;
+      const isWebsiteOnly = !email && website;
+      row.className = `border-t border-gray-700/50 ${isWebsiteOnly ? 'bg-gray-900 opacity-70' : isEven ? 'bg-gray-800' : 'bg-gray-750'} hover:bg-gray-700 transition-colors`;
       row.style.animation = 'fadeIn 0.3s ease';
 
       const bookTitle = lead.bookTitle || lead.book_title || '';
@@ -1021,7 +1022,9 @@
                 <span class="text-green-400 truncate max-w-40" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
                 <button onclick="navigator.clipboard.writeText('${escapeHtml(email)}').then(()=>this.textContent='✓').catch(()=>{})" class="text-gray-500 hover:text-green-400 text-xs shrink-0" title="Copy">📋</button>
                </div>`
-            : '<span class="text-gray-600">—</span>'}
+            : website
+              ? `<span class="text-yellow-600 text-xs italic">🌐 Contact via website</span>`
+              : '<span class="text-gray-600">—</span>'}
         </td>
         <td class="px-3 py-2 text-xs">${websiteHtml}</td>
         <td class="px-3 py-2 text-xs">

@@ -161,7 +161,7 @@ async function verifyEmail(email) {
     );
     const status = response.data?.data?.status;
     return {
-      valid: status === 'valid' || status === 'accept_all',
+      valid: status === 'valid', // 100% verified only — accept_all means server accepts everything, can't confirm person
       status: status
     };
   } catch (error) {
@@ -1053,7 +1053,8 @@ app.get('/api/jobs/:jobId/leads', (req, res) => {
   const { framework = 'amazon' } = req.query;
   let leads;
   if (framework === 'amazon') {
-    leads = db.prepare('SELECT * FROM amazon_leads WHERE job_id = ? AND email_verified = 1 AND is_duplicate = 0 ORDER BY id').all(jobId);
+    // Return verified leads first, then website-only leads (no email but has website)
+    leads = db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? AND is_duplicate = 0 AND (email_verified = 1 OR (email IS NULL AND website IS NOT NULL)) ORDER BY email_verified DESC, id`).all(jobId);
   } else {
     leads = db.prepare('SELECT * FROM intent_leads WHERE job_id = ? AND email_verified = 1 AND is_duplicate = 0 ORDER BY id').all(jobId);
   }
@@ -1106,7 +1107,8 @@ app.delete('/api/jobs/:jobId', (req, res) => {
 app.get('/api/export/:jobId', (req, res) => {
   const { jobId } = req.params;
   const { framework = 'amazon', verifiedOnly = 'true' } = req.query;
-  const verifiedFilter = verifiedOnly === 'true' ? 'AND email_verified = 1 AND is_duplicate = 0' : '';
+  // verifiedOnly=true: show verified email leads + website-only leads (both useful)
+  const verifiedFilter = verifiedOnly === 'true' ? `AND is_duplicate = 0 AND (email_verified = 1 OR (email IS NULL AND website IS NOT NULL))` : '';
   const job = db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -1395,37 +1397,48 @@ app.post('/api/amazon', async (req, res) => {
             // Website check
             const hasRealWebsite = website ? isRealAuthorWebsite(website) : false;
 
+            // Skip entirely if no email AND no website — nothing useful to save
+            if (!email && !hasRealWebsite) {
+              saveLog(jobId, 'info', `⏭️ SKIP (no email, no website): ${author}`);
+              return;
+            }
+
             // Check for cross-job email duplicate
             let isDuplicate = 0;
             if (email && emailVerified) {
               const emailExists = db.prepare('SELECT id FROM amazon_leads WHERE email = ? AND job_id != ?').get(email, jobId);
               if (emailExists) {
                 isDuplicate = 1;
-                saveLog(jobId, 'warning', `♻️ DUPLICATE email across jobs: ${email} — saving but not counting`);
+                saveLog(jobId, 'warning', `♻️ DUPLICATE email: ${email}`);
               }
             }
 
-            // Save to DB regardless
+            // Save to DB — both verified email leads AND website-only leads
             try {
               db.prepare(
                 `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, website, amazon_url, asin, is_duplicate)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
               ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, hasRealWebsite ? website : null, amazonUrl, asin, isDuplicate);
             } catch (dbErr) {
-              // UNIQUE constraint hit (race condition) — skip
               saveLog(jobId, 'warning', `⚠️ DB insert skipped (dupe): ${asin}`);
               return;
             }
 
-            // Count if email verified + non-duplicate (website is nice-to-have but not required)
+            totalCount++;
+
             if (emailVerified && isDuplicate === 0) {
+              // Fully verified lead — counts toward target
               verifiedCount++;
               db.prepare('UPDATE scrape_jobs SET verified_count = ?, total_count = ? WHERE id = ?').run(verifiedCount, totalCount, jobId);
-              saveLog(jobId, 'success', `✅ VERIFIED LEAD #${verifiedCount}: ${author} | ${email}`);
+              saveLog(jobId, 'success', `✅ VERIFIED #${verifiedCount}: ${author} | ${email}`);
+            } else if (!email && hasRealWebsite) {
+              // Website-only lead — useful but not counted toward target
+              db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
+              saveLog(jobId, 'info', `🌐 WEBSITE-ONLY: ${author} | ${website}`);
             } else {
               db.prepare('UPDATE scrape_jobs SET total_count = ? WHERE id = ?').run(totalCount, jobId);
-              const reason = !emailVerified ? 'no verified email' : isDuplicate ? 'duplicate email' : 'no real author website';
-              saveLog(jobId, 'info', `📝 Saved (not counted — ${reason}): ${author}`);
+              const reason = isDuplicate ? 'duplicate email' : 'unverified email';
+              saveLog(jobId, 'info', `📝 Saved (${reason}): ${author}`);
             }
           } // end processBook
 
