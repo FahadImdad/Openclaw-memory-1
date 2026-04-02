@@ -765,68 +765,45 @@ function getAmazonUrl(urlIndex, page) {
 }
 
 // Parse Amazon search results HTML (Web Unlocker) into book objects
-// Handles both search (/s?i=stripbooks) and bestseller (/zgbs/) page formats
+// Pattern confirmed from live HTML: title in <h2 ...><span>TITLE</span>, author after "by </span><span>AUTHOR</span>"
 function parseAmazonNewReleasesHtml(html) {
   const books = [];
 
-  // Extract all ASINs from data-asin attributes
-  const asinSet = new Set(
-    (html.match(/data-asin="([A-Z0-9]{8,12})"/g) || [])
-      .map(m => m.match(/"([^"]+)"/)[1])
-      .filter(a => a && a.length >= 8)
-  );
-
-  for (const asin of asinSet) {
-    const idx = html.indexOf(`data-asin="${asin}"`);
-    if (idx < 0) continue;
-    const chunk = html.substring(idx, idx + 3000);
-
-    // ── Title extraction ──────────────────────────────────────────────
-    // Search results: <h2 ...><a ...><span>TITLE</span>
-    // Bestseller: p13n-sc-css-line-clamp div
-    let title = '';
-    const titlePatterns = [
-      /class="[^"]*a-size-medium[^"]*"[^>]*>\s*([^<]{5,200})\s*<\//,         // search result title span
-      /class="[^"]*a-size-base-plus[^"]*"[^>]*>\s*([^<]{5,200})\s*<\//,      // alternate title class
-      /p13n-sc-css-line-clamp[^"]*"[^>]*>([^<]{5,150})<\//,                  // bestseller title
-      /href="\/[^"]+\/dp\/[A-Z0-9]+"[^>]*><span[^>]*>([^<]{5,150})<\//,     // link-based title
-    ];
-    for (const pat of titlePatterns) {
-      const m = chunk.match(pat);
-      if (m && m[1].trim().length > 4) { title = m[1].trim(); break; }
-    }
-    if (!title) continue;
-
-    // ── Author extraction ─────────────────────────────────────────────
-    // Search results: author link with /s?i=stripbooks&field-author= or /stores/author/
-    // Bestseller: 2nd p13n-sc-css-line-clamp element
-    let author = '';
-    const authorPatterns = [
-      /field-author=([^&"]+)[^>]*>([^<]{2,80})<\/a>/,                        // search ?field-author= param
-      /\/stores\/[^/"]+\/[^"]*"[^>]*>\s*([^<]{2,60})\s*<\/a>/,              // /stores/AuthorName/
-      /\/[^"]*\/e\/[A-Z0-9]+[^"]*"[^>]*>([^<]{2,60})<\/a>/,                // author page /e/ link
-    ];
-    for (const pat of authorPatterns) {
-      const m = chunk.match(pat);
-      const candidate = (pat.source.includes('field-author') ? m?.[2] : m?.[1])?.trim();
-      if (candidate && candidate.length > 2 && !/^\d/.test(candidate)) {
-        author = candidate;
-        break;
-      }
-    }
-    // Bestseller fallback — 2nd p13n clamp element
-    if (!author) {
-      const clampMatches = [...chunk.matchAll(/p13n-sc-css-line-clamp[^"]*"[^>]*>([^<]{2,80})<\//g)];
-      if (clampMatches.length >= 2) author = clampMatches[1][1].trim();
-    }
-    if (!author) author = 'Unknown';
-
-    // Clean HTML entities
-    title = title.replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
-    author = author.replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
-
-    books.push({ asin, title, author, publishDate: '', amazonUrl: `https://www.amazon.com/dp/${asin}` });
+  function decodeEntities(s) {
+    return s.replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
   }
+
+  // Pattern confirmed from live HTML:
+  // <h2 ... class="a-size-medium a-spacing-none a-color-base a-text-normal"><span>TITLE</span></h2></a>
+  // followed by: by </span><span class="a-size-base">AUTHOR</span>
+  // The title also appears earlier in alt="" — we MUST match the h2 span specifically
+  const titleRe = /<h2[^>]*class="a-size-medium a-spacing-none a-color-base a-text-normal"[^>]*><span>([^<]{5,250})<\/span><\/h2>/g;
+  let m;
+  while ((m = titleRe.exec(html)) !== null) {
+    const title = decodeEntities(m[1]);
+    if (!title || title.length < 5) continue;
+
+    // Look backwards up to 1000 chars for the ASIN in the /dp/ASIN/ URL
+    const before = html.substring(Math.max(0, m.index - 1000), m.index);
+    const asinM = before.match(/\/dp\/([A-Z0-9]{10})\//g);
+    const asin = asinM ? asinM[asinM.length - 1].replace('/dp/', '').replace('/', '') : null;
+    if (!asin) continue;
+
+    // Look forward 600 chars for author — two patterns:
+    // 1. <span class="a-size-base">by </span><span ...>AUTHOR</span>  (plain text author)
+    // 2. <span class="a-size-base">by </span><a ...>AUTHOR</a>         (linked author)
+    const after = html.substring(m.index + m[0].length, m.index + m[0].length + 600);
+    const authorM = after.match(/by <\/span><span[^>]*>([^<]{2,80})<\/span>/) ||
+                    after.match(/by <\/span><a[^>]*>([^<]{2,80})<\/a>/);
+    const author = authorM ? decodeEntities(authorM[1]) : 'Unknown';
+
+    // Publication date
+    const dateM = after.match(/a-color-secondary a-text-normal">([^<]{4,30})<\/span>/);
+    const publishDate = dateM ? decodeEntities(dateM[1]) : '';
+
+    books.push({ asin, title, author, publishDate, amazonUrl: `https://www.amazon.com/dp/${asin}` });
+  }
+
   return books;
 }
 
