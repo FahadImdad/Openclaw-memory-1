@@ -709,121 +709,121 @@ function isLikelyAuthorEmail(email, authorName) {
   return false;
 }
 
-// Amazon category URLs — 80+ categories × 2 pages × ~40 books = ~6,400 unique books per cycle
-const AMAZON_BASE_URLS = [
-  // New Releases
-  'https://www.amazon.com/gp/new-releases/books',
-  // Top-level categories
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2635',      // Business & Money
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4736',      // Self Help
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/6',         // Health/Fitness
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/486994011', // Biographies
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/22',        // Religion
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4919',      // Parenting
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/75',        // Science & Math
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/9',         // History
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/11232',     // Politics/Social
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2642',      // Travel
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4677',      // Education
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/3',         // Children
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4',         // Computers
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/173507',    // Arts & Photography
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/3510',      // Romance
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/25',        // Computers/Technology
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/156012011', // Business Finance
-  // Business subcategories
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2501',      // Entrepreneurship
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2579',      // Leadership
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2558',      // Marketing
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2546',      // Management
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2533',      // Investing
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2531',      // Personal Finance
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/2638',      // Real Estate
-  // Self Help subcategories
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4507',      // Motivational
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4508',      // Happiness
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4734',      // Anxiety & Phobias
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4740',      // Success
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/4744',      // Relationships
-  // Health subcategories
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/6',         // Health
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/10',        // Diet & Weight Loss
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/11',        // Exercise & Fitness
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/12',        // Mental Health
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/13',        // Nutrition
-  // Religion subcategories
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/12290',     // Christianity
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/12293',     // Islam
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/12292',     // Judaism
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/12291',     // Spirituality
-  // Fiction genres
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/10672',     // Literature & Fiction
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/49',        // Mystery & Thriller
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/48',        // Science Fiction
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/47',        // Fantasy
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/3510',      // Romance
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/695398',    // Historical Fiction
-  // Nonfiction categories
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/53',        // True Crime
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/54',        // Science & Technology
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/55',        // Nature
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/56',        // Sports & Outdoors
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/57',        // Crafts & Hobbies
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/58',        // Cooking
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/59',        // Humor
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/60',        // Graphic Novels
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/61',        // Gay & Lesbian
-  // Memoir/Biography subcategories
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/486994011', // Biographies
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/700200',    // Memoirs
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/700201',    // Specific Groups
-  // Teen & Young Adult
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/28',        // Teen & Young Adult
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/155009011', // YA Fiction
-  // Professional & Technical
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/173514',    // Law
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/173513',    // Medical
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/173512',    // Engineering
-  // Arts & Creativity
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/173507',    // Arts & Photography
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/298471',    // Music
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/17',        // Architecture
-  // Additional
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/7',         // Parenting & Families
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/8',         // Reference
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/14',        // Comics & Graphic Novels
-  'https://www.amazon.com/best-sellers-books-Amazon/zgbs/books/15',        // Calendars
+// Amazon category node IDs — each supports 400 pages of search results (~16,000 books per category)
+// URL format: https://www.amazon.com/s?i=stripbooks&rh=n:NODE_ID&page=N&s=date-desc-rank
+const AMAZON_CATEGORY_NODES = [
+  { id: '2635',      name: 'Business & Money' },
+  { id: '4736',      name: 'Self Help' },
+  { id: '6',         name: 'Health & Fitness' },
+  { id: '486994011', name: 'Biographies' },
+  { id: '22',        name: 'Religion & Spirituality' },
+  { id: '4919',      name: 'Parenting' },
+  { id: '75',        name: 'Science & Math' },
+  { id: '9',         name: 'History' },
+  { id: '11232',     name: 'Politics & Social' },
+  { id: '2642',      name: 'Travel' },
+  { id: '4677',      name: 'Education' },
+  { id: '3',         name: 'Children' },
+  { id: '4',         name: 'Computers & Tech' },
+  { id: '173507',    name: 'Arts & Photography' },
+  { id: '3510',      name: 'Romance' },
+  { id: '2501',      name: 'Entrepreneurship' },
+  { id: '2579',      name: 'Leadership' },
+  { id: '2558',      name: 'Marketing' },
+  { id: '2533',      name: 'Investing' },
+  { id: '2531',      name: 'Personal Finance' },
+  { id: '4507',      name: 'Motivational' },
+  { id: '4734',      name: 'Anxiety & Phobias' },
+  { id: '4744',      name: 'Relationships' },
+  { id: '10',        name: 'Diet & Weight Loss' },
+  { id: '12',        name: 'Mental Health' },
+  { id: '12290',     name: 'Christianity' },
+  { id: '12293',     name: 'Islam' },
+  { id: '12291',     name: 'Spirituality' },
+  { id: '10672',     name: 'Literature & Fiction' },
+  { id: '49',        name: 'Mystery & Thriller' },
+  { id: '48',        name: 'Science Fiction' },
+  { id: '47',        name: 'Fantasy' },
+  { id: '695398',    name: 'Historical Fiction' },
+  { id: '700200',    name: 'Memoirs' },
+  { id: '28',        name: 'Teen & Young Adult' },
+  { id: '173514',    name: 'Law' },
+  { id: '173513',    name: 'Medical' },
+  { id: '298471',    name: 'Music' },
 ];
-const MAX_PAGES_PER_URL = 2; // Amazon bestseller pages support up to 2 pages (pg=3 returns empty)
 
-function buildAmazonUrl(dateFrom, dateTo, page = 1) { return null; }
+// Each category supports up to 400 pages (~16 books/page = ~6,400 books per category)
+const MAX_PAGES_PER_URL = 400;
+
+function buildAmazonUrl(dateFrom, dateTo, page = 1) { return null; } // legacy stub
 
 function getAmazonUrl(urlIndex, page) {
-  const base = AMAZON_BASE_URLS[urlIndex % AMAZON_BASE_URLS.length];
+  const cat = AMAZON_CATEGORY_NODES[urlIndex % AMAZON_CATEGORY_NODES.length];
   const pg = Math.max(1, Math.min(page, MAX_PAGES_PER_URL));
-  return `${base}?pg=${pg}`;
+  // Sort by newest first so we get fresh books
+  return `https://www.amazon.com/s?i=stripbooks&rh=n%3A${cat.id}&page=${pg}&s=date-desc-rank`;
 }
 
-// Parse Amazon new-releases / best-seller HTML (Web Unlocker) into book objects
+// Parse Amazon search results HTML (Web Unlocker) into book objects
+// Handles both search (/s?i=stripbooks) and bestseller (/zgbs/) page formats
 function parseAmazonNewReleasesHtml(html) {
   const books = [];
-  const asinSet = new Set((html.match(/data-asin="([A-Z0-9]{8,12})"/g)||[]).map(m => m.match(/"([^"]+)"/)[1]));
+
+  // Extract all ASINs from data-asin attributes
+  const asinSet = new Set(
+    (html.match(/data-asin="([A-Z0-9]{8,12})"/g) || [])
+      .map(m => m.match(/"([^"]+)"/)[1])
+      .filter(a => a && a.length >= 8)
+  );
 
   for (const asin of asinSet) {
     const idx = html.indexOf(`data-asin="${asin}"`);
     if (idx < 0) continue;
-    const chunk = html.substring(idx, idx + 2500);
+    const chunk = html.substring(idx, idx + 3000);
 
-    // Title from p13n class or href slug
-    const titleM = chunk.match(/p13n-sc-css-line-clamp[^"]*"[^>]*>([^<]{5,150})<\//) ||
-                   chunk.match(/href="\/[^"]+\/dp\/[A-Z0-9]+"[^>]*><span[^>]*>([^<]{5,150})<\//);
-    const title = titleM ? titleM[1].trim() : '';
+    // ── Title extraction ──────────────────────────────────────────────
+    // Search results: <h2 ...><a ...><span>TITLE</span>
+    // Bestseller: p13n-sc-css-line-clamp div
+    let title = '';
+    const titlePatterns = [
+      /class="[^"]*a-size-medium[^"]*"[^>]*>\s*([^<]{5,200})\s*<\//,         // search result title span
+      /class="[^"]*a-size-base-plus[^"]*"[^>]*>\s*([^<]{5,200})\s*<\//,      // alternate title class
+      /p13n-sc-css-line-clamp[^"]*"[^>]*>([^<]{5,150})<\//,                  // bestseller title
+      /href="\/[^"]+\/dp\/[A-Z0-9]+"[^>]*><span[^>]*>([^<]{5,150})<\//,     // link-based title
+    ];
+    for (const pat of titlePatterns) {
+      const m = chunk.match(pat);
+      if (m && m[1].trim().length > 4) { title = m[1].trim(); break; }
+    }
     if (!title) continue;
 
-    // Author is in the 2nd p13n-sc-css-line-clamp div (first is title, second is author)
-    const clampMatches = [...chunk.matchAll(/p13n-sc-css-line-clamp[^"]*"[^>]*>([^<]{2,80})<\//g)];
-    const author = clampMatches.length >= 2 ? clampMatches[1][1].trim() :
-                   (chunk.match(/href="\/[^"]*\/e\/[A-Z0-9]+[^"]*"[^>]*>([^<]{2,60})<\/a>/) || [])[1]?.trim() || 'Unknown';
+    // ── Author extraction ─────────────────────────────────────────────
+    // Search results: author link with /s?i=stripbooks&field-author= or /stores/author/
+    // Bestseller: 2nd p13n-sc-css-line-clamp element
+    let author = '';
+    const authorPatterns = [
+      /field-author=([^&"]+)[^>]*>([^<]{2,80})<\/a>/,                        // search ?field-author= param
+      /\/stores\/[^/"]+\/[^"]*"[^>]*>\s*([^<]{2,60})\s*<\/a>/,              // /stores/AuthorName/
+      /\/[^"]*\/e\/[A-Z0-9]+[^"]*"[^>]*>([^<]{2,60})<\/a>/,                // author page /e/ link
+    ];
+    for (const pat of authorPatterns) {
+      const m = chunk.match(pat);
+      const candidate = (pat.source.includes('field-author') ? m?.[2] : m?.[1])?.trim();
+      if (candidate && candidate.length > 2 && !/^\d/.test(candidate)) {
+        author = candidate;
+        break;
+      }
+    }
+    // Bestseller fallback — 2nd p13n clamp element
+    if (!author) {
+      const clampMatches = [...chunk.matchAll(/p13n-sc-css-line-clamp[^"]*"[^>]*>([^<]{2,80})<\//g)];
+      if (clampMatches.length >= 2) author = clampMatches[1][1].trim();
+    }
+    if (!author) author = 'Unknown';
+
+    // Clean HTML entities
+    title = title.replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    author = author.replace(/&#x27;/g, "'").replace(/&amp;/g, '&');
 
     books.push({ asin, title, author, publishDate: '', amazonUrl: `https://www.amazon.com/dp/${asin}` });
   }
