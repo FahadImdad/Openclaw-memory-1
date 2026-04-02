@@ -1395,23 +1395,36 @@ app.post('/api/amazon', async (req, res) => {
             // Verify email
             let emailVerified = false;
             let emailStatus = null;
+            let emailConfidence = null; // 'high' | 'medium' | 'low'
             if (email) {
+              const emailLocal = (email.split('@')[0] || '').toLowerCase();
               const emailDomain = (email.split('@')[1] || '').toLowerCase().replace(/^www\./, '');
               const authorNameParts = author.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(p=>p.length>2);
               const emailOnAuthorDomain = authorNameParts.some(part => emailDomain.includes(part));
+              const GENERIC_DOMAINS = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','me.com','mac.com','aol.com','protonmail.com'];
+              const isGenericDomain = GENERIC_DOMAINS.includes(emailDomain);
+              const localHasAuthorName = authorNameParts.some(part => emailLocal.includes(part));
 
               if (emailOnAuthorDomain) {
-                // Email is on author's own domain (e.g. productinfo@howardpartridge.com)
-                // Auto-accept — no need to Hunter verify, it's definitely their domain
+                // e.g. productinfo@howardpartridge.com — definitely theirs
                 emailVerified = true;
                 emailStatus = 'author_domain';
-                saveLog(jobId, 'success', `✅ AUTO-ACCEPTED: email on author's own domain (${emailDomain})`);
+                emailConfidence = 'high';
+                saveLog(jobId, 'success', `✅ HIGH: email on author domain (${emailDomain})`);
+              } else if (isGenericDomain && localHasAuthorName) {
+                // e.g. howardpartridge@gmail.com — name in local part, medium confidence
+                emailVerified = true;
+                emailStatus = 'name_match';
+                emailConfidence = 'medium';
+                saveLog(jobId, 'success', `🟡 MEDIUM: Gmail/Yahoo with author name (${email})`);
               } else {
+                // Unknown email — run Hunter to verify
                 saveLog(jobId, 'hunter', `📧 HUNTER.IO: Verifying ${email}...`);
                 const verification = await verifyEmail(email);
                 emailVerified = verification.valid;
                 emailStatus = verification.status;
-                saveLog(jobId, emailVerified ? 'success' : 'warning', `${emailVerified ? '✅' : '⚠️'} HUNTER.IO: ${emailStatus || 'unverified'}`);
+                emailConfidence = emailVerified ? 'high' : 'low';
+                saveLog(jobId, emailVerified ? 'success' : 'warning', `${emailVerified ? '✅ HIGH' : '⚠️ LOW'}: HUNTER.IO ${emailStatus || 'unverified'}`);
               }
             }
 
@@ -1438,9 +1451,9 @@ app.post('/api/amazon', async (req, res) => {
             totalCount++;
             try {
               db.prepare(
-                `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, website, amazon_url, asin, is_duplicate)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-              ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, hasRealWebsite ? website : null, amazonUrl, asin, isDuplicate);
+                `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, emailConfidence || null, hasRealWebsite ? website : null, amazonUrl, asin, isDuplicate);
             } catch (dbErr) {
               saveLog(jobId, 'warning', `⚠️ DB insert skipped (dupe): ${asin}`);
               totalCount--;

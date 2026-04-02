@@ -779,8 +779,8 @@
         leads.forEach((l, i) => {
           const lead = {
             id: i+1, author: l.author||'Unknown', bookTitle: l.book_title||'',
-            publishDate: l.publish_date||'', reviewCount: l.review_count||0, email: l.email, emailVerified: true,
-            emailStatus: l.email_status||'', website: l.website||'', amazonUrl: l.amazon_url, scrapedAt: l.scraped_at
+            publishDate: l.publish_date||'', reviewCount: l.review_count||0, email: l.email, emailVerified: !!l.email_verified,
+            emailStatus: l.email_status||'', emailConfidence: l.email_confidence||'', website: l.website||'', amazonUrl: l.amazon_url, scrapedAt: l.scraped_at
           };
           amazonLeads.push(lead);
           renderAmazonLead(lead);
@@ -1028,8 +1028,13 @@
         </td>
         <td class="px-3 py-2 text-xs">
           ${email
-            ? `<div class="flex items-center gap-1">
-                <span class="text-green-400 truncate max-w-40" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
+            ? `<div class="flex items-center gap-1 flex-wrap">
+                ${(lead.emailConfidence||lead.email_confidence) === 'high'
+                  ? '<span class="text-xs bg-green-900 text-green-300 px-1 rounded shrink-0">🟢 High</span>'
+                  : (lead.emailConfidence||lead.email_confidence) === 'medium'
+                  ? '<span class="text-xs bg-yellow-900 text-yellow-300 px-1 rounded shrink-0">🟡 Medium</span>'
+                  : '<span class="text-xs bg-gray-700 text-gray-400 px-1 rounded shrink-0">⚪ Low</span>'}
+                <span class="text-green-400 truncate max-w-36" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
                 <button onclick="navigator.clipboard.writeText('${escapeHtml(email)}').then(()=>this.textContent='✓').catch(()=>{})" class="text-gray-500 hover:text-green-400 text-xs shrink-0" title="Copy">📋</button>
                </div>`
             : website
@@ -1094,8 +1099,8 @@
 
     function exportAmazonLeads() {
       if (amazonLeads.length === 0) { alert('No verified leads to export'); return; }
-      const headers = ['#','Author','Book Title','Published','Reviews','Email','Email Status','Website','Amazon URL','Scraped At'];
-      const rows = amazonLeads.map((l, i) => [i+1, l.author, l.bookTitle||l.book_title, l.publishDate||l.publish_date||'', l.reviewCount||l.review_count||0, l.email||'', l.emailStatus||l.email_status||'verified', l.website||'', l.amazonUrl||l.amazon_url, l.scrapedAt||l.scraped_at]);
+      const headers = ['#','Author','Book Title','Published','Reviews','Email','Confidence','Email Status','Website','Amazon URL','Scraped At'];
+      const rows = amazonLeads.map((l, i) => [i+1, l.author, l.bookTitle||l.book_title, l.publishDate||l.publish_date||'', l.reviewCount||l.review_count||0, l.email||'', l.emailConfidence||l.email_confidence||'', l.emailStatus||l.email_status||'', l.website||'', l.amazonUrl||l.amazon_url, l.scrapedAt||l.scraped_at]);
       downloadCsv([headers, ...rows], `amazon_authors_${new Date().toISOString().split('T')[0]}.csv`);
     }
 

@@ -33,6 +33,7 @@ _db.exec(`
     email TEXT,
     email_verified INTEGER DEFAULT 0,
     email_status TEXT,
+    email_confidence TEXT,
     website TEXT,
     amazon_url TEXT,
     asin TEXT,
