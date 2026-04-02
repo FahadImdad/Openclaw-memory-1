@@ -53,7 +53,7 @@ const CRAIGSLIST_CITIES = [
 // ============================================================
 
 // Save a log entry to the job_logs table
-function saveLog(jobId, level, message) {
+async function saveLog(jobId, level, message) {
   await db.prepare('INSERT INTO job_logs (job_id, level, message) VALUES (?, ?, ?)').run(jobId, level, message);
 }
 
@@ -1039,16 +1039,16 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
 // ============================================================
 
 // GET /api/ping — keepalive / wake-up
-app.get('/api/ping', (req, res) => res.json({ ok: true, time: Date.now() }));
+app.get('/api/ping', async (req, res) => res.json({ ok: true, time: Date.now() }));
 
 // GET /api/jobs — list all scrape jobs
-app.get('/api/jobs', (req, res) => {
+app.get('/api/jobs', async (req, res) => {
   const jobs = await db.prepare('SELECT * FROM scrape_jobs ORDER BY created_at DESC').all();
   res.json(jobs);
 });
 
 // GET /api/jobs/:jobId/leads — fetch verified leads for display in table
-app.get('/api/jobs/:jobId/leads', (req, res) => {
+app.get('/api/jobs/:jobId/leads', async (req, res) => {
   const { jobId } = req.params;
   const { framework = 'amazon' } = req.query;
   let leads;
@@ -1062,7 +1062,7 @@ app.get('/api/jobs/:jobId/leads', (req, res) => {
 });
 
 // GET /api/jobs/:jobId/logs — poll for new logs since a given id
-app.get('/api/jobs/:jobId/logs', (req, res) => {
+app.get('/api/jobs/:jobId/logs', async (req, res) => {
   const { jobId } = req.params;
   const since = parseInt(req.query.since || '0');
   const logs = await db.prepare('SELECT * FROM job_logs WHERE job_id = ? AND id > ? ORDER BY id ASC LIMIT 100').all(jobId, since);
@@ -1071,28 +1071,28 @@ app.get('/api/jobs/:jobId/logs', (req, res) => {
 });
 
 // POST /api/jobs/:jobId/pause
-app.post('/api/jobs/:jobId/pause', (req, res) => {
+app.post('/api/jobs/:jobId/pause', async (req, res) => {
   const { jobId } = req.params;
   await db.prepare('UPDATE scrape_jobs SET is_paused=1 WHERE id=?').run(jobId);
   res.json({ ok: true });
 });
 
 // POST /api/jobs/:jobId/resume
-app.post('/api/jobs/:jobId/resume', (req, res) => {
+app.post('/api/jobs/:jobId/resume', async (req, res) => {
   const { jobId } = req.params;
   await db.prepare('UPDATE scrape_jobs SET is_paused=0 WHERE id=?').run(jobId);
   res.json({ ok: true });
 });
 
 // POST /api/jobs/:jobId/cancel
-app.post('/api/jobs/:jobId/cancel', (req, res) => {
+app.post('/api/jobs/:jobId/cancel', async (req, res) => {
   const { jobId } = req.params;
   await db.prepare("UPDATE scrape_jobs SET status='cancelled', is_paused=0 WHERE id=?").run(jobId);
   res.json({ ok: true });
 });
 
 // DELETE /api/jobs/:jobId — delete a job and its leads
-app.delete('/api/jobs/:jobId', (req, res) => {
+app.delete('/api/jobs/:jobId', async (req, res) => {
   const { jobId } = req.params;
   const job = await db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -1104,7 +1104,7 @@ app.delete('/api/jobs/:jobId', (req, res) => {
 });
 
 // GET /api/export/:jobId — CSV export (verified, non-duplicate only)
-app.get('/api/export/:jobId', (req, res) => {
+app.get('/api/export/:jobId', async (req, res) => {
   const { jobId } = req.params;
   const { framework = 'amazon', verifiedOnly = 'true' } = req.query;
   // verifiedOnly=true: show verified email leads + website-only leads (both useful)
@@ -1131,12 +1131,12 @@ app.get('/api/export/:jobId', (req, res) => {
 });
 
 // GET /api/cities
-app.get('/api/cities', (req, res) => {
+app.get('/api/cities', async (req, res) => {
   res.json({ cities: CRAIGSLIST_CITIES });
 });
 
 // GET /api/health
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   res.json({
     status: 'ok',
     apis: {
@@ -1148,7 +1148,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // GET /api/stats — dashboard summary
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
   const total = await db.prepare('SELECT COUNT(*) as c FROM amazon_leads').get()?.c || 0;
   const verified = await db.prepare('SELECT COUNT(*) as c FROM amazon_leads WHERE email_verified=1').get()?.c || 0;
   const websites = await db.prepare('SELECT COUNT(*) as c FROM amazon_leads WHERE website IS NOT NULL').get()?.c || 0;
@@ -1157,7 +1157,7 @@ app.get('/api/stats', (req, res) => {
 });
 
 // GET /api/version — returns git commit info baked at build time
-app.get('/api/version', (req, res) => {
+app.get('/api/version', async (req, res) => {
   res.json({
     commit: process.env.RENDER_GIT_COMMIT || 'local',
     commitShort: (process.env.RENDER_GIT_COMMIT || 'local').substring(0, 7),
