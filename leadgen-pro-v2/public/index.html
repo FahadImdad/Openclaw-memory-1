@@ -693,27 +693,45 @@
       if (!data) { container.innerHTML = '<div class="text-xs text-gray-600 py-4 text-center">No leads yet.</div>'; return; }
       const searchQ = (document.getElementById(`task-search-${jobId}`)?.value || '').toLowerCase().trim();
       let leads = data[sheet] || [];
-      if (searchQ) leads = leads.filter(l => (l.author||'').toLowerCase().includes(searchQ) || (l.email||'').toLowerCase().includes(searchQ));
+      if (searchQ) leads = leads.filter(l =>
+        (l.author||'').toLowerCase().includes(searchQ) ||
+        (l.email||'').toLowerCase().includes(searchQ) ||
+        (l.book_title||'').toLowerCase().includes(searchQ) ||
+        (l.website||'').toLowerCase().includes(searchQ)
+      );
       if (leads.length === 0) { container.innerHTML = `<div class="text-xs text-gray-500 py-4 text-center">${searchQ ? 'No results' : 'No ' + sheet + ' leads yet.'}</div>`; return; }
+      const isWebsiteTab = sheet === 'website';
       container.innerHTML = `<table class="w-full text-xs">
         <thead class="bg-gray-700 sticky top-0"><tr>
           <th class="px-2 py-1.5 text-left text-gray-400 font-semibold">#</th>
           <th class="px-2 py-1.5 text-left text-gray-400 font-semibold">Author</th>
           <th class="px-2 py-1.5 text-left text-gray-400 font-semibold">Book</th>
-          <th class="px-2 py-1.5 text-left text-gray-400 font-semibold">Email</th>
-          <th class="px-2 py-1.5 text-left text-gray-400 font-semibold">Link</th>
+          <th class="px-2 py-1.5 text-left text-gray-400 font-semibold">⭐</th>
+          <th class="px-2 py-1.5 text-left text-gray-400 font-semibold">${isWebsiteTab ? 'Website' : 'Email'}</th>
+          <th class="px-2 py-1.5 text-left text-gray-400 font-semibold">Links</th>
         </tr></thead>
-        <tbody>${leads.map((l,i) => `<tr class="${i%2===0?'bg-gray-800':'bg-gray-850'} border-t border-gray-700/50 hover:bg-gray-700">
-          <td class="px-2 py-1.5 text-gray-500">${i+1}</td>
-          <td class="px-2 py-1.5 text-white font-medium"><div class="truncate max-w-28" title="${escapeHtml(l.author||'')}">${escapeHtml(l.author||'')}</div></td>
-          <td class="px-2 py-1.5 text-gray-300"><div class="truncate max-w-36" title="${escapeHtml(l.book_title||'')}">${escapeHtml(l.book_title||'')}</div></td>
-          <td class="px-2 py-1.5">
-            ${l.email
-              ? `<div class="flex items-center gap-1"><span class="text-green-400 truncate max-w-36">${escapeHtml(l.email)}</span><button onclick="navigator.clipboard.writeText('${escapeHtml(l.email||'')}').then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='📋',2000)}).catch(()=>{})" class="text-gray-500 hover:text-green-400 shrink-0">📋</button></div>`
-              : `<span class="text-yellow-600 italic text-xs">via website</span>`}
-          </td>
-          <td class="px-2 py-1.5"><a href="${escapeHtml(l.amazon_url||'#')}" target="_blank" class="text-orange-400 hover:text-orange-300">📚</a></td>
-        </tr>`).join('')}</tbody>
+        <tbody>${leads.map((l,i) => {
+          const reviewBadge = (l.review_count > 0)
+            ? `<span class="text-yellow-400">${l.review_count}</span>`
+            : `<span class="text-gray-600">0</span>`;
+          const contactCell = l.email
+            ? `<div class="flex items-center gap-1"><span class="text-green-400 truncate max-w-32" title="${escapeHtml(l.email)}">${escapeHtml(l.email)}</span><button onclick="navigator.clipboard.writeText('${escapeHtml(l.email||'')}').then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='📋',2000)}).catch(()=>{})" class="text-gray-500 hover:text-green-400 shrink-0">📋</button></div>`
+            : l.website
+              ? `<a href="${escapeHtml(l.website)}" target="_blank" class="text-blue-400 hover:underline truncate max-w-40 block" title="${escapeHtml(l.website)}">${escapeHtml(l.website.replace(/^https?:\/\/(www\.)?/,'').substring(0,35))}</a>`
+              : `<span class="text-gray-600">—</span>`;
+          const linksCell = [
+            l.website ? `<a href="${escapeHtml(l.website)}" target="_blank" class="text-blue-400 hover:text-blue-300" title="Author website">🌐</a>` : '',
+            l.amazon_url ? `<a href="${escapeHtml(l.amazon_url)}" target="_blank" class="text-orange-400 hover:text-orange-300" title="Amazon">📚</a>` : ''
+          ].filter(Boolean).join(' ');
+          return `<tr class="${i%2===0?'bg-gray-800':'bg-gray-850'} border-t border-gray-700/50 hover:bg-gray-700">
+            <td class="px-2 py-1.5 text-gray-500">${i+1}</td>
+            <td class="px-2 py-1.5 text-white font-medium"><div class="truncate max-w-24" title="${escapeHtml(l.author||'')}">${escapeHtml(l.author||'')}</div></td>
+            <td class="px-2 py-1.5 text-gray-300"><div class="truncate max-w-36" title="${escapeHtml(l.book_title||'')}">${escapeHtml((l.book_title||'').substring(0,45))}${(l.book_title||'').length>45?'…':''}</div></td>
+            <td class="px-2 py-1.5 text-center">${reviewBadge}</td>
+            <td class="px-2 py-1.5">${contactCell}</td>
+            <td class="px-2 py-1.5 whitespace-nowrap">${linksCell}</td>
+          </tr>`;
+        }).join('')}</tbody>
       </table>`;
     }
 
