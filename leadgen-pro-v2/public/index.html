@@ -1531,18 +1531,29 @@
       loadStats();
 
       // Auto-attach polling to any already-running job on page load
+      // Also auto-resume interrupted jobs
       setTimeout(async () => {
         try {
           const res = await fetch('/api/jobs');
           const jobs = await res.json();
           const running = jobs.find(j => j.status === 'running');
+          const interrupted = jobs.find(j => j.status === 'interrupted' || j.status === 'error');
+
           if (running && !activeJobId) {
             console.log(`Auto-attaching poll to running job #${running.id}`);
-            // startPolling will set lastLogId to current tail automatically
             startPolling(running.id, running.framework || 'amazon');
+          } else if (!running && interrupted && interrupted.framework === 'amazon') {
+            // Auto-resume interrupted job without user clicking
+            console.log(`Auto-resuming interrupted job #${interrupted.id}`);
+            const r = await fetch(`/api/jobs/${interrupted.id}/restart`, { method: 'POST' });
+            const d = await r.json();
+            if (d.ok) {
+              await loadJobs('amazon');
+              startPolling(interrupted.id, 'amazon');
+            }
           }
         } catch(e) {}
-      }, 1000);
+      }, 2000);
 
       // Auto-refresh: re-render when anything changes
       setInterval(async () => {
