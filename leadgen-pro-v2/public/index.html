@@ -421,7 +421,7 @@
     function progressBar(verified, target) {
       const pct = target > 0 ? Math.min(100, Math.round((verified / target) * 100)) : 0;
       const color = pct >= 100 ? 'bg-green-500' : 'bg-blue-500';
-      return `<div class="bg-gray-700 rounded-full h-1.5 mt-1"><div class="${color} h-1.5 rounded-full transition-all" style="width:${pct}%"></div></div>`;
+      return `<div class="bg-gray-700 rounded-full h-1.5 mt-1"><div class="${color} h-1.5 rounded-full transition-all task-progress-fill" style="width:${pct}%"></div></div>`;
     }
 
     async function loadJobs(framework) {
@@ -456,7 +456,7 @@
                 <span class="text-xs font-bold text-gray-400">Task #${job.id}</span>
                 <span class="text-xs text-gray-500">${fw}</span>
                 ${statusBadge(job)}
-                <span class="text-xs text-gray-400 ml-1">✅ ${job.verified_count}/${job.target_leads}</span>
+                <span class="text-xs text-gray-400 ml-1 task-verified-badge">✅ ${job.verified_count}/${job.target_leads}</span>
                 <span class="text-xs text-gray-600">${job.date_from} → ${job.date_to}</span>
               </div>
               ${progressBar(job.verified_count, job.target_leads)}
@@ -889,15 +889,19 @@
             lastLogId = log.id;
             // Update inline card log if expanded
             const inlineLog = document.getElementById(`task-log-${jobId}`);
-            if (inlineLog && inlineLog.children.length > 0 && inlineLog.children[0].textContent !== 'Loading logs...') {
+            if (inlineLog) {
+              // Clear placeholder if present
+              if (inlineLog.children.length === 1 && (inlineLog.children[0].textContent.includes('Loading') || inlineLog.children[0].textContent.includes('No logs'))) {
+                inlineLog.innerHTML = '';
+              }
               const colors = {success:'text-green-400',error:'text-red-400',warning:'text-yellow-400',info:'text-gray-300',hunter:'text-blue-400',brightdata:'text-cyan-400'};
               const div = document.createElement('div');
               div.className = colors[log.level] || 'text-gray-400';
-              div.textContent = `[${new Date().toLocaleTimeString()}] ${log.message}`;
+              const ts = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+              div.textContent = `[${ts}] ${log.message}`;
               inlineLog.appendChild(div);
               inlineLog.scrollTop = inlineLog.scrollHeight;
-              // Keep max 100 entries
-              while (inlineLog.children.length > 100) inlineLog.removeChild(inlineLog.firstChild);
+              while (inlineLog.children.length > 150) inlineLog.removeChild(inlineLog.firstChild);
             }
 
             // Update stats counters from log messages
@@ -1496,6 +1500,24 @@
       loadVersion();
       loadStats();
 
+      // Auto-attach polling to any already-running job on page load
+      setTimeout(async () => {
+        try {
+          const res = await fetch('/api/jobs');
+          const jobs = await res.json();
+          const running = jobs.find(j => j.status === 'running');
+          if (running && !activeJobId) {
+            console.log(`Auto-attaching poll to running job #${running.id}`);
+            // Get last log id so we only stream new logs
+            const logRes = await fetch(`/api/jobs/${running.id}/logs?since=0&countOnly=1`);
+            const logData = await logRes.json();
+            lastLogId = Math.max(0, (logData.total || 0) - 1);
+            activeJobId = running.id;
+            startPolling(running.id, running.framework || 'amazon');
+          }
+        } catch(e) {}
+      }, 1000);
+
       // Auto-refresh: only re-render if something actually changed (avoids scroll-jump)
       setInterval(async () => {
         try {
@@ -1513,6 +1535,17 @@
             const verifiedEl = document.getElementById(`task-stat-verified-${job.id}`);
             if (processedEl) processedEl.textContent = job.total_count || 0;
             if (verifiedEl) verifiedEl.textContent = job.verified_count || 0;
+            // Also update the header badge ✅ X/Y and progress bar
+            const card = document.getElementById(`task-card-${job.id}`);
+            if (card) {
+              const badgeEl = card.querySelector('.task-verified-badge');
+              if (badgeEl) badgeEl.textContent = `✅ ${job.verified_count}/${job.target_leads}`;
+              const fillEl = card.querySelector('.task-progress-fill');
+              if (fillEl) {
+                const pct = job.target_leads > 0 ? Math.min(100, Math.round((job.verified_count / job.target_leads) * 100)) : 0;
+                fillEl.style.width = `${pct}%`;
+              }
+            }
           });
           loadStats();
         } catch(e) {}
