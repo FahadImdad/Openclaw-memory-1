@@ -38,6 +38,7 @@ const SCHEMA_PG = `
     website TEXT,
     amazon_url TEXT,
     asin TEXT,
+    publisher TEXT,
     is_duplicate INTEGER DEFAULT 0,
     is_non_english INTEGER DEFAULT 0,
     scraped_at TEXT DEFAULT CURRENT_TIMESTAMP,

@@ -804,15 +804,20 @@ function parseAmazonNewReleasesHtml(html) {
     const dateM = after.match(/a-color-secondary a-text-normal">([^<]{4,30})<\/span>/);
     const publishDate = dateM ? decodeEntities(dateM[1]) : '';
 
+    // Publisher — appears after date in "Publisher : NAME" or "by NAME" patterns
+    const publisherM = after.match(/Publisher\s*[:\-]\s*<[^>]+>([^<]{2,80})<\//) ||
+                       after.match(/Publisher\s*[:\-]\s*([A-Za-z][^<\n]{2,60})/) ||
+                       after.match(/class="[^"]*publisher[^"]*"[^>]*>([^<]{2,80})<\//i);
+    const publisher = publisherM ? decodeEntities(publisherM[1].trim()) : '';
+
     // Review count — aria-label="X ratings" or popoverLabel "X out of 5 stars"
-    // Also check the before chunk (ratings sometimes appear before title in HTML order)
     const fullArea = before.substring(before.length - 500) + after;
     const reviewM = fullArea.match(/aria-label="([\d,]+) ratings?"/i) ||
                     fullArea.match(/"([\d,]+) global ratings?"/i) ||
                     fullArea.match(/(\d+)\s*customer reviews?/i);
     const reviewCount = reviewM ? parseInt(reviewM[1].replace(/,/g, '')) : 0;
 
-    books.push({ asin, title, author, publishDate, reviewCount, amazonUrl: `https://www.amazon.com/dp/${asin}` });
+    books.push({ asin, title, author, publisher, publishDate, reviewCount, amazonUrl: `https://www.amazon.com/dp/${asin}` });
   }
 
   return books;
@@ -1122,8 +1127,8 @@ app.get('/api/export/:jobId', async (req, res) => {
   let leads, headers, rows;
   if (framework === 'amazon') {
     leads = await db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
-    headers = ['#','Author','Book Title','Published','Reviews','Email','Email Status','Website','Amazon URL','Scraped At'];
-    rows = leads.map((l,i) => [i+1, l.author, l.book_title, l.publish_date||'', l.review_count||0, l.email||'', l.email_status||'', l.website||'', l.amazon_url, l.scraped_at]);
+    headers = ['#','Author','Book Title','Publisher','Published','Reviews','Email','Email Status','Website','Amazon URL','Scraped At'];
+    rows = leads.map((l,i) => [i+1, l.author, l.book_title, l.publisher||'', l.publish_date||'', l.review_count||0, l.email||'', l.email_status||'', l.website||'', l.amazon_url, l.scraped_at]);
   } else {
     leads = await db.prepare(`SELECT * FROM intent_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
     headers = ['#','Name','Title','Email','Email Status','Phone','WhatsApp','Budget','City','Source','URL','Posted Date','Scraped At'];
@@ -1505,9 +1510,9 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             totalCount++;
             try {
               await db.prepare(
-                `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate, is_non_english)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-              ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, emailConfidence || null, hasRealWebsite ? website : null, amazonUrl, asin, 0, isNonEnglish ? 1 : 0);
+                `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate, is_non_english, publisher)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, emailConfidence || null, hasRealWebsite ? website : null, amazonUrl, asin, 0, isNonEnglish ? 1 : 0, book.publisher || null);
             } catch (dbErr) {
               await saveLog(jobId, 'warning', `⚠️ DB insert skipped (dupe ASIN): ${asin}`);
               totalCount--;
@@ -2003,6 +2008,7 @@ const PORT = process.env.PORT || 3000;
       await db.exec("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_url_index INTEGER DEFAULT 0");
       await db.exec("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_page INTEGER DEFAULT 1");
       await db.exec("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS is_non_english INTEGER DEFAULT 0");
+      await db.exec("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS publisher TEXT");
     }
 
     // Find jobs that were running when server last died
