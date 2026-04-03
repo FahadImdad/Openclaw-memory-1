@@ -2046,6 +2046,14 @@ const PORT = process.env.PORT || 3000;
           }
         } catch(e) {}
       }, 10 * 60 * 1000); // every 10 min
+
+      // Turso keep-alive — ping DB every 6 hours to prevent free tier data expiry
+      setInterval(async () => {
+        try {
+          await db.prepare('SELECT 1').get();
+          console.log('💾 Turso keep-alive ping');
+        } catch(e) {}
+      }, 6 * 60 * 60 * 1000);
     });
 
   } catch(e) {
