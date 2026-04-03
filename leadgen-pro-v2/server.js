@@ -933,66 +933,38 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
 
   saveLog('info', `🔍 ${authorName}...`);
 
-  // ── HUNTER FIRST: Try Hunter email finder with common author domains ──
-  // Zero Bright Data calls needed — just Hunter API
-  if (HUNTER_API_KEY) {
-    const tryDomains = [
-      `${firstName}${lastName}.com`,
-      `${firstName}${lastName}author.com`,
-      `${nameSlug}.com`,
-    ];
-    const hunterResults = await Promise.all(tryDomains.map(domain =>
-      axios.get(`https://api.hunter.io/v2/email-finder?domain=${domain}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`, { timeout: 6000 })
-        .then(r => ({ email: r.data?.data?.email, score: r.data?.data?.score || 0, domain }))
-        .catch(() => null)
-    ));
-    const hunterHit = hunterResults.find(r => r?.email && r.score >= 30);
-    if (hunterHit) {
-      saveLog('success', `📧 Hunter first: ${hunterHit.email} (${hunterHit.score}%)`);
-      return { email: hunterHit.email, website: `https://${hunterHit.domain}` };
-    }
-  }
+  // ══════════════════════════════════════════════════════════════
+  // COST-OPTIMIZED FLOW — minimize Bright Data calls
+  // Priority: Hunter API (free) → Google (1 BD call) → scrape (1 BD call)
+  // Max Bright Data calls per author: 2 (Google + website)
+  // ══════════════════════════════════════════════════════════════
 
-  // ── FAST PATH: Guess author's domain — all 3 in parallel ──────────────
-  const guessDomains = [
+  // ── STEP 1: Hunter email finder on likely domains (FREE — no Bright Data) ──
+  // Try the 2 most common author domain patterns sequentially (not parallel — save Hunter credits)
+  const likelyDomains = [
     `${firstName}${lastName}.com`,
-    `${firstName}${lastName}author.com`,
     `${nameSlug}.com`,
   ];
-  const fastResults = await Promise.all(guessDomains.map(async domain => {
+  for (const domain of likelyDomains) {
     try {
-      const html = await scrapeWithBrightData(`https://${domain}`);
-      if (!html || html.length < 500) return null;
-      if (!nameParts.some(p => html.toLowerCase().includes(p))) return null;
-      const emails = extractEmails(html);
-      if (emails.length > 0) return { email: emails[0], website: `https://${domain}` };
-      // No email on homepage — try /contact
-      const ch = await scrapeWithBrightData(`https://${domain}/contact`);
-      if (ch) {
-        const ce = extractEmails(ch);
-        if (ce.length > 0) return { email: ce[0], website: `https://${domain}` };
+      const r = await axios.get(
+        `https://api.hunter.io/v2/email-finder?domain=${domain}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
+        { timeout: 6000 }
+      ).catch(() => null);
+      const email = r?.data?.data?.email;
+      const score = r?.data?.data?.score || 0;
+      if (email && score >= 50) {
+        saveLog('success', `📧 Hunter domain: ${email} (${score}%)`);
+        return { email, website: `https://${domain}` };
       }
-      // Hunter on this domain
-      if (HUNTER_API_KEY) {
-        const r = await axios.get(`https://api.hunter.io/v2/email-finder?domain=${domain}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`, { timeout: 8000 }).catch(() => null);
-        const e = r?.data?.data?.email;
-        if (e) return { email: e, website: `https://${domain}` };
-      }
-      return { email: null, website: `https://${domain}` }; // site found, no email
-    } catch(e) { return null; }
-  }));
-  const fastHit = fastResults.find(r => r?.email);
-  if (fastHit) {
-    saveLog('success', `📧 Fast: ${fastHit.email}`);
-    return fastHit;
+    } catch(e) {}
   }
 
-  // ── PHASE 1: Single Google search to find author website ─────────────
+  // ── STEP 2: Single Google search (1 Bright Data call) ────────────────
   let foundWebsite = null;
   try {
-    const html = await scrapeWithBrightData(
-      `https://www.google.com/search?q=${encodeURIComponent('"' + authorName + '" author official website')}&num=10`
-    );
+    const googleUrl = `https://www.google.com/search?q=${encodeURIComponent('"' + authorName + '" author site')}&num=5`;
+    const html = await scrapeWithBrightData(googleUrl);
     if (html) {
       const sites = extractRealWebsites(html);
       foundWebsite = sites.find(s => {
@@ -1009,27 +981,37 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
     return { email: null, website: null };
   }
 
-  // ── PHASE 2: Visit homepage + /contact (2 calls max) ─────────────────
   saveLog('info', `🌐 ${foundWebsite}`);
-  for (const path of ['', '/contact']) {
-    const result = await fetchEmails(foundWebsite.replace(/\/$/, '') + path);
-    if (result.email) {
-      saveLog('success', `📧 ${result.email}`);
-      return { email: result.email, website: foundWebsite };
-    }
-  }
 
-  // ── PHASE 3: Hunter domain search (1 call) ───────────────────────────
-  if (HUNTER_API_KEY) {
+  // ── STEP 3: Hunter on found domain (FREE — no Bright Data) ───────────
+  try {
     const domain = new URL(foundWebsite).hostname.replace(/^www\./, '');
-    const r = await axios.get(`https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`, { timeout: 8000 }).catch(() => null);
+    const r = await axios.get(
+      `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
+      { timeout: 8000 }
+    ).catch(() => null);
     const email = r?.data?.data?.email;
     const score = r?.data?.data?.score || 0;
-    if (email && score >= 40) {
+    if (email && score >= 30) {
       saveLog('success', `📧 Hunter: ${email} (${score}%)`);
       return { email, website: foundWebsite };
     }
-  }
+  } catch(e) {}
+
+  // ── STEP 4: Scrape author website for email (1 Bright Data call) ──────
+  try {
+    const result = await fetchEmails(foundWebsite);
+    if (result.email) {
+      saveLog('success', `📧 Scraped: ${result.email}`);
+      return { email: result.email, website: foundWebsite };
+    }
+    // Try /contact page only if homepage had no email
+    const contactResult = await fetchEmails(foundWebsite.replace(/\/$/, '') + '/contact');
+    if (contactResult.email) {
+      saveLog('success', `📧 Contact: ${contactResult.email}`);
+      return { email: contactResult.email, website: foundWebsite };
+    }
+  } catch(e) {}
 
   return { email: null, website: foundWebsite };
 }
@@ -1254,15 +1236,31 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
       try {
         await saveLog(jobId, 'info', `🚀 Amazon scraper using Web Unlocker (no browser needed)...`);
 
-        // Scrape Amazon page via Web Unlocker (no browser needed — returns full HTML)
+        // Scrape Amazon page — direct HTTP first (FREE), fallback to Bright Data only if blocked
+        const AMAZON_HEADERS = [
+          { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36', 'Accept-Language': 'en-US,en;q=0.9', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+          { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36', 'Accept-Language': 'en-US,en;q=0.9' },
+          { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+        ];
+        let headerIdx = 0;
+
         async function scrapeOnePage(pageNum) {
           const pgUrl = getAmazonUrl(urlIndex, pageNum);
           try {
-            await saveLog(jobId, 'info', `🌐 Fetching: ${pgUrl.substring(30,70)}...`);
-            const html = await scrapeWithBrightData(pgUrl);
-            if (!html) return [];
-            const books = parseAmazonNewReleasesHtml(html);
-            return books;
+            // Try direct HTTP first (no cost)
+            const headers = AMAZON_HEADERS[headerIdx % AMAZON_HEADERS.length];
+            headerIdx++;
+            const resp = await axios.get(pgUrl, { headers, timeout: 15000, maxRedirects: 3 });
+            const html = resp.data;
+            if (html && html.includes('a-size-medium') && !html.includes('To discuss automated access')) {
+              const books = parseAmazonNewReleasesHtml(html);
+              if (books.length > 0) return books;
+            }
+            // Blocked — fallback to Bright Data (costs money)
+            await saveLog(jobId, 'info', `🔄 Direct blocked, using BD for page ${pageNum}...`);
+            const bdHtml = await scrapeWithBrightData(pgUrl);
+            if (!bdHtml) return [];
+            return parseAmazonNewReleasesHtml(bdHtml);
           } catch(e) {
             await saveLog(jobId, 'warning', `⚠️ Page fetch error: ${e.message}`);
             return [];
