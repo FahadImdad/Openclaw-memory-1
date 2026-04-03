@@ -1167,10 +1167,17 @@ app.get('/api/health', async (req, res) => {
 
 // GET /api/stats — dashboard summary
 app.get('/api/stats', async (req, res) => {
-  const verified = await db.prepare('SELECT COUNT(*) as c FROM amazon_leads WHERE email_verified=1 AND is_duplicate=0').get()?.c || 0;
-  const websites = await db.prepare('SELECT COUNT(*) as c FROM amazon_leads WHERE website IS NOT NULL AND is_duplicate=0').get()?.c || 0;
-  const jobs = await db.prepare("SELECT COUNT(*) as c FROM scrape_jobs WHERE framework='amazon'").get()?.c || 0;
-  res.json({ verified, websites, jobs });
+  try {
+    const vRow = await db.prepare('SELECT COUNT(*) as cnt FROM amazon_leads WHERE email_verified=1 AND is_duplicate=0').get();
+    const wRow = await db.prepare('SELECT COUNT(*) as cnt FROM amazon_leads WHERE website IS NOT NULL AND is_duplicate=0').get();
+    const jRow = await db.prepare("SELECT COUNT(*) as cnt FROM scrape_jobs WHERE framework='amazon'").get();
+    const verified = Number(vRow?.cnt || vRow?.c || 0);
+    const websites = Number(wRow?.cnt || wRow?.c || 0);
+    const jobs = Number(jRow?.cnt || jRow?.c || 0);
+    res.json({ verified, websites, jobs });
+  } catch(e) {
+    res.json({ verified: 0, websites: 0, jobs: 0, error: e.message });
+  }
 });
 
 // GET /api/version — returns git commit info baked at build time
@@ -1216,8 +1223,13 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
 
     // Resume from existing counts + position (in case of server restart)
     const existingCounts = await db.prepare('SELECT verified_count, total_count, resume_url_index, resume_page FROM scrape_jobs WHERE id=?').get(jobId);
-    let verifiedCount = existingCounts?.verified_count || 0;
-    let totalCount = existingCounts?.total_count || 0;
+    // Always read actual counts from DB rows — job counter can drift on restart
+    const actualVerified = await db.prepare('SELECT COUNT(*) as cnt FROM amazon_leads WHERE job_id=? AND email_verified=1 AND is_duplicate=0').get(jobId);
+    const actualTotal = await db.prepare('SELECT COUNT(*) as cnt FROM amazon_leads WHERE job_id=?').get(jobId);
+    let verifiedCount = Number(actualVerified?.cnt || actualVerified?.c || existingCounts?.verified_count || 0);
+    let totalCount = Number(actualTotal?.cnt || actualTotal?.c || existingCounts?.total_count || 0);
+    // Sync job record to match reality
+    await db.prepare('UPDATE scrape_jobs SET verified_count=?, total_count=? WHERE id=?').run(verifiedCount, totalCount, jobId);
 
     try {
       const resuming = verifiedCount > 0;
