@@ -1999,10 +1999,13 @@ const PORT = process.env.PORT || 3000;
   try {
     await db.init();
 
-    // Run migrations for new columns (ignore errors if columns already exist)
-    await db.exec("ALTER TABLE scrape_jobs ADD COLUMN resume_url_index INTEGER DEFAULT 0").catch(() => {});
-    await db.exec("ALTER TABLE scrape_jobs ADD COLUMN resume_page INTEGER DEFAULT 1").catch(() => {});
-    await db.exec("ALTER TABLE amazon_leads ADD COLUMN is_non_english INTEGER DEFAULT 0").catch(() => {});
+    // Migrations handled by schema in db.js for fresh DBs
+    // For existing PG tables, add columns if missing
+    if (db._pg) {
+      await db.exec("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_url_index INTEGER DEFAULT 0");
+      await db.exec("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_page INTEGER DEFAULT 1");
+      await db.exec("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS is_non_english INTEGER DEFAULT 0");
+    }
 
     // Find jobs that were running when server last died
     const staleJobs = await db.prepare(`SELECT * FROM scrape_jobs WHERE status = 'running'`).all();

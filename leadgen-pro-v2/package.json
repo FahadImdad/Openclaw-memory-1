@@ -24,6 +24,7 @@
     "node-fetch": "^2.7.0",
     "node-sqlite3-wasm": "^0.8.55",
     "puppeteer-core": "^22.15.0",
-    "xlsx": "^0.18.0"
+    "xlsx": "^0.18.0",
+    "pg": "^8.13.3"
   }
 }
