@@ -666,7 +666,7 @@ function isBlockedEmail(email) {
   const local = email.split('@')[0].toLowerCase();
   if (/^(email|user|name|yourname|your\.name|your-name|firstname|lastname|your\.email|youremail|someone|test|info@info|hello@hello)$/.test(local)) return true;
   // Block generic/role emails — not personal author emails
-  if (/^(user|admin|noreply|no-reply|test|example|support|help|sales|webmaster|postmaster|hostmaster|abuse|privacy|legal|billing|accounts|newsletter|news|media|press|pr|marketing|office|staff|team|service|enquiries|enquiry)@/i.test(email)) return true;
+  if (/^(user|admin|noreply|no-reply|test|example|support|help|sales|webmaster|postmaster|hostmaster|abuse|privacy|legal|billing|accounts|newsletter|news|media|press|pr|marketing|office|staff|team|service|enquiries|enquiry|contact|info|hello|hey|hi|mail|email|me|web|site|general|reception|editor|editors|submit|submissions|invites|invite|orders|order|shop|store|social|digital|ventas|hola|bonjour|ciao|servicio)@/i.test(email)) return true;
   if (/\d+\.\d+\.\d+/.test(email)) return true;
   if (local.length > 40) return true;
   if (BLOCKED_DOMAINS.some(d => email.toLowerCase().includes(d))) return true;
@@ -1215,11 +1215,13 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
       // progress/lead/complete are handled via DB updates — no action needed
     };
 
-    let verifiedCount = 0;
-    let totalCount = 0;
+    // Resume from existing counts (in case of server restart)
+    const existingCounts = await db.prepare('SELECT verified_count, total_count FROM scrape_jobs WHERE id=?').get(jobId);
+    let verifiedCount = existingCounts?.verified_count || 0;
+    let totalCount = existingCounts?.total_count || 0;
 
     try {
-      await saveLog(jobId, 'info', `🚀 Starting Amazon Author Lead Gen (job #${jobId}, target: ${targetLeads} verified leads)...`);
+      await saveLog(jobId, 'info', `🚀 ${verifiedCount > 0 ? `Resuming` : `Starting`} Amazon Author Lead Gen (job #${jobId}, target: ${targetLeads}, already verified: ${verifiedCount})...`);
 
       let page_num = 1;
       const maxPages = MAX_PAGES_PER_URL;
@@ -1331,6 +1333,22 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             // Skip unknown authors — can't find contact info for them
             if (!author || author === 'Unknown' || author.trim().length < 3) {
               await saveLog(jobId, 'info', `⏭️ SKIP (unknown author): ${title.substring(0, 50)}`);
+              return;
+            }
+
+            // Skip fake/publisher pen names — no real person to contact
+            // Signals: ends in Press/Books/Publishing/Studio/Media/Planners/Designs/Systems/Solutions
+            // OR has no spaces (single word that looks like a brand, not a name)
+            const authorWords = author.trim().split(/\s+/);
+            const lastWord = authorWords[authorWords.length - 1].toLowerCase();
+            const publisherKeywords = ['press','books','publishing','publishers','publications','studio','studios','media','planners','planner','designs','systems','solutions','collective','group','hub','inc','llc','ltd','co.','corp','academy','institute','network','digital','creative','creatives','productions','records','works','workshop','workshops'];
+            if (publisherKeywords.includes(lastWord)) {
+              await saveLog(jobId, 'info', `⏭️ SKIP (publisher/brand name): ${author}`);
+              return;
+            }
+            // Also skip if name has no vowels or looks like a keyword slug
+            if (!/[aeiou]/i.test(author)) {
+              await saveLog(jobId, 'info', `⏭️ SKIP (non-person name): ${author}`);
               return;
             }
 
