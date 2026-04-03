@@ -1084,6 +1084,24 @@ app.post('/api/jobs/:jobId/resume', async (req, res) => {
   res.json({ ok: true });
 });
 
+// POST /api/jobs/:jobId/restart — re-run an interrupted/errored amazon job
+app.post('/api/jobs/:jobId/restart', async (req, res) => {
+  const { jobId } = req.params;
+  const job = await db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
+  if (!job) return res.status(404).json({ error: 'Job not found' });
+  if (job.status === 'running') return res.json({ ok: false, error: 'Job is already running' });
+  if (job.framework !== 'amazon') return res.json({ ok: false, error: 'Only Amazon jobs can be restarted' });
+
+  // Check no other amazon job is running
+  const running = await db.prepare(`SELECT id FROM scrape_jobs WHERE framework='amazon' AND status='running'`).get();
+  if (running) return res.json({ ok: false, error: `Job #${running.id} is already running` });
+
+  await db.prepare(`UPDATE scrape_jobs SET status='running', completed_at=NULL WHERE id=?`).run(jobId);
+  await saveLog(jobId, 'info', `🔄 Manually restarted by user`);
+  setImmediate(() => runAmazonJob(jobId, job.date_from, job.date_to, job.target_leads, job.keyword));
+  res.json({ ok: true });
+});
+
 // POST /api/jobs/:jobId/cancel
 app.post('/api/jobs/:jobId/cancel', async (req, res) => {
   const { jobId } = req.params;
@@ -1186,36 +1204,9 @@ app.get('/api/debug/craigslist', async (req, res) => {
 });
 
 // ============================================================
-// POST /api/amazon — Amazon Author Lead Gen (background job)
+// CORE AMAZON SCRAPE RUNNER — called by POST and auto-resume
 // ============================================================
-app.post('/api/amazon', async (req, res) => {
-  const { dateFrom, dateTo, targetLeads = 1000, keyword } = req.body;
-
-  if (!dateFrom || !dateTo) {
-    return res.status(400).json({ error: 'dateFrom and dateTo are required' });
-  }
-
-  console.log(`[${new Date().toISOString()}] Amazon search: dateFrom=${dateFrom}, dateTo=${dateTo}, targetLeads=${targetLeads}`);
-
-  // Prevent duplicate jobs — if one is already running, return that job
-  const existingJob = await db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'amazon' AND status = 'running'`).get();
-  if (existingJob) {
-    return res.json({ jobId: existingJob.id, alreadyRunning: true });
-  }
-
-  // Create scrape job in DB
-  const jobResult = await db.prepare(
-    `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
-     VALUES ('amazon', ?, ?, ?, ?, 'running')`
-  ).run(dateFrom, dateTo, keyword || null, targetLeads);
-  const jobId = jobResult.lastInsertRowid;
-
-  // Return job ID immediately so frontend can start polling
-  res.setHeader('Content-Type', 'application/json');
-  res.json({ jobId });
-
-  // Run scraping in background
-  setImmediate(async () => {
+async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
     // Local sendEvent writes logs to DB instead of SSE
     const sendEvent = async (type, data) => {
       if (type === 'log') {
@@ -1509,7 +1500,39 @@ app.post('/api/amazon', async (req, res) => {
         await saveLog(jobId, 'error', `❌ Fatal background error: ${fatalErr.message}`);
       } catch(e) {}
     }
-  });
+}
+
+// ============================================================
+// POST /api/amazon — Amazon Author Lead Gen (background job)
+// ============================================================
+app.post('/api/amazon', async (req, res) => {
+  const { dateFrom, dateTo, targetLeads = 1000, keyword } = req.body;
+
+  if (!dateFrom || !dateTo) {
+    return res.status(400).json({ error: 'dateFrom and dateTo are required' });
+  }
+
+  console.log(`[${new Date().toISOString()}] Amazon search: dateFrom=${dateFrom}, dateTo=${dateTo}, targetLeads=${targetLeads}`);
+
+  // Prevent duplicate jobs — if one is already running, return that job
+  const existingJob = await db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'amazon' AND status = 'running'`).get();
+  if (existingJob) {
+    return res.json({ jobId: existingJob.id, alreadyRunning: true });
+  }
+
+  // Create scrape job in DB
+  const jobResult = await db.prepare(
+    `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
+     VALUES ('amazon', ?, ?, ?, ?, 'running')`
+  ).run(dateFrom, dateTo, keyword || null, targetLeads);
+  const jobId = jobResult.lastInsertRowid;
+
+  // Return job ID immediately so frontend can start polling
+  res.setHeader('Content-Type', 'application/json');
+  res.json({ jobId });
+
+  // Run scraping in background
+  setImmediate(() => runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword));
 });
 
 // ============================================================
@@ -1903,18 +1926,59 @@ app.post('/api/search', async (req, res) => {
 // ============================================================
 const PORT = process.env.PORT || 3000;
 
-// Async startup — init DB schema, clean stale jobs, then start server
+// Async startup — init DB schema, auto-resume interrupted jobs, then start server
 (async () => {
   try {
     await db.init();
-    await db.exec("UPDATE scrape_jobs SET status='interrupted', completed_at=CURRENT_TIMESTAMP WHERE status='running'");
-    console.log('✅ Cleaned up stale running jobs (marked interrupted)');
+
+    // Find jobs that were running when server last died
+    const staleJobs = await db.prepare(`SELECT * FROM scrape_jobs WHERE status = 'running'`).all();
+
+    if (staleJobs.length > 0) {
+      console.log(`🔄 Found ${staleJobs.length} interrupted job(s) — will auto-resume after server starts`);
+      // Mark as interrupted first so UI shows the right status while server boots
+      await db.exec("UPDATE scrape_jobs SET status='interrupted' WHERE status='running'");
+    } else {
+      console.log('✅ No stale jobs found');
+    }
+
+    app.listen(PORT, () => {
+      console.log(`🚀 LeadGen Pro v2 running on port ${PORT}`);
+      console.log(`🔑 APIs: Bright Data ✅ | Hunter ✅ | Gemini ✅`);
+
+      // Auto-resume interrupted amazon jobs after a short delay (let server fully boot first)
+      setTimeout(async () => {
+        try {
+          const interrupted = await db.prepare(`SELECT * FROM scrape_jobs WHERE status = 'interrupted' AND framework = 'amazon' ORDER BY id DESC`).all();
+          for (const job of interrupted) {
+            console.log(`🔄 Auto-resuming job #${job.id}...`);
+            await db.prepare(`UPDATE scrape_jobs SET status='running', completed_at=NULL WHERE id=?`).run(job.id);
+            await saveLog(job.id, 'info', `🔄 Auto-resumed after server restart`);
+            runAmazonJob(job.id, job.date_from, job.date_to, job.target_leads, job.keyword);
+          }
+          if (interrupted.length > 0) console.log(`✅ Resumed ${interrupted.length} job(s)`);
+        } catch(e) {
+          console.error('Auto-resume error:', e.message);
+        }
+      }, 3000);
+
+      // Self-ping every 10 minutes to prevent Render free tier from sleeping mid-job
+      const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+      setInterval(async () => {
+        try {
+          const runningJob = await db.prepare(`SELECT id FROM scrape_jobs WHERE status='running' LIMIT 1`).get();
+          if (runningJob) {
+            await axios.get(`${SELF_URL}/api/ping`, { timeout: 5000 }).catch(() => {});
+            console.log(`💓 Keep-alive ping sent (job #${runningJob.id} running)`);
+          }
+        } catch(e) {}
+      }, 10 * 60 * 1000); // every 10 min
+    });
+
   } catch(e) {
     console.log('⚠️ DB init warning:', e.message);
+    app.listen(PORT, () => {
+      console.log(`🚀 LeadGen Pro v2 running on port ${PORT} (DB warning: ${e.message})`);
+    });
   }
-
-  app.listen(PORT, () => {
-    console.log(`🚀 LeadGen Pro v2 running on port ${PORT}`);
-    console.log(`🔑 APIs: Bright Data ✅ | Hunter ✅ | Gemini ✅`);
-  });
 })();

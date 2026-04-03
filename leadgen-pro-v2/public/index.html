@@ -464,6 +464,7 @@
               ${isRunning && !(job.is_paused||0) ? `<button onclick="pauseTask(${job.id},'${framework}')" class="px-2 py-1 rounded bg-yellow-600 hover:bg-yellow-700 text-xs text-white">⏸</button>` : ''}
               ${isRunning && (job.is_paused||0) ? `<button onclick="resumeTask(${job.id},'${framework}')" class="px-2 py-1 rounded bg-green-600 hover:bg-green-700 text-xs text-white">▶</button>` : ''}
               ${isRunning ? `<button onclick="cancelTask(${job.id},'${framework}')" class="px-2 py-1 rounded bg-red-700 hover:bg-red-800 text-xs text-white">✕</button>` : ''}
+              ${!isRunning && job.framework === 'amazon' && (job.status === 'interrupted' || job.status === 'error') ? `<button onclick="restartTask(${job.id},'${framework}')" class="px-2 py-1 rounded bg-blue-600 hover:bg-blue-700 text-xs text-white" title="Continue from where it left off">🔄 Resume</button>` : ''}
               <a href="/api/export/${job.id}?framework=${job.framework}&verifiedOnly=true" class="px-2 py-1 rounded bg-green-700 hover:bg-green-800 text-xs text-white">📥</a>
               <button onclick="deleteJob(${job.id},'${framework}')" class="px-2 py-1 rounded bg-gray-600 hover:bg-red-700 text-xs text-white">🗑</button>
               <span class="px-2 py-1 text-xs text-gray-400" id="toggle-btn-${job.id}">${expanded ? '▲' : '▼'}</span>
@@ -685,6 +686,13 @@
     async function cancelTask(jobId, framework) {
       if (!confirm('Cancel this task?')) return;
       await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+      loadJobs(framework);
+    }
+
+    async function restartTask(jobId, framework) {
+      const res = await fetch(`/api/jobs/${jobId}/restart`, { method: 'POST' });
+      const data = await res.json();
+      if (!data.ok) { alert('Cannot restart: ' + (data.error || 'Unknown error')); return; }
       loadJobs(framework);
     }
 
