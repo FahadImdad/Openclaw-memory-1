@@ -801,12 +801,6 @@ function parseAmazonNewReleasesHtml(html) {
                     fullArea.match(/(\d+)\s*customer reviews?/i);
     const reviewCount = reviewM ? parseInt(reviewM[1].replace(/,/g, '')) : 0;
 
-    // DEBUG: log raw after-block for first book to see publisher HTML structure
-    if (books.length === 0) {
-      const fs = require('fs');
-      fs.writeFileSync('/tmp/amazon_debug.html', after, 'utf8');
-    }
-
     books.push({ asin, title, author, publisher, publishDate, reviewCount, amazonUrl: `https://www.amazon.com/dp/${asin}` });
   }
 
@@ -1204,15 +1198,6 @@ app.get('/api/version', async (req, res) => {
   });
 });
 
-// GET /api/debug/amazon-html — return raw after-block from first parsed book
-app.get('/api/debug/amazon-html', (req, res) => {
-  try {
-    const fs = require('fs');
-    const html = fs.readFileSync('/tmp/amazon_debug.html', 'utf8');
-    res.set('Content-Type', 'text/plain').send(html);
-  } catch(e) { res.status(404).send('No debug file yet — run a job first'); }
-});
-
 // GET /api/debug/craigslist
 app.get('/api/debug/craigslist', async (req, res) => {
   const logs = [];
@@ -1472,6 +1457,35 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
 
             // Find author contact
             const { email, website } = await findAuthorContact(author, title, async (level, msg) => await saveLog(jobId, level, msg), jobId);
+
+            // Option B — scrape book detail page for publisher + accurate date (only if author has website)
+            if (website && (!book.publisher || !book.publishDate)) {
+              try {
+                const detailHtml = await scrapeWithBrightData(`https://www.amazon.com/dp/${asin}`, jobId);
+                if (detailHtml) {
+                  // Publisher from detail page: <span class="rpi-icon book_details-publisher"></span>...<span>NAME</span>
+                  // or #byline_secondary_view_div, or "Publisher" row in product details
+                  const pubM =
+                    detailHtml.match(/book_details-publisher[^>]*>.*?<span[^>]*>([^<]{2,80})<\/span>/s) ||
+                    detailHtml.match(/Publisher\s*<\/span>\s*<[^>]+>\s*([^<]{2,80})<\//) ||
+                    detailHtml.match(/class="[^"]*publisher[^"]*"[^>]*>([^<]{2,80})<\//i);
+                  if (pubM && !book.publisher) {
+                    book.publisher = pubM[1].trim().replace(/\s+/g,' ').substring(0,60);
+                    await saveLog(jobId, 'info', `🏢 Publisher: ${book.publisher}`);
+                  }
+                  // Date from detail page if missing
+                  if (!book.publishDate) {
+                    const dateM =
+                      detailHtml.match(/book_details-publication_date[^>]*>.*?<span[^>]*>([^<]{4,30})<\/span>/s) ||
+                      detailHtml.match(/Publication date[^<]*<\/[^>]+>\s*(?:<[^>]+>)*([A-Z][a-z]+ \d+, \d{4})/);
+                    if (dateM) {
+                      book.publishDate = dateM[1].trim();
+                      await saveLog(jobId, 'info', `📅 Date from detail: ${book.publishDate}`);
+                    }
+                  }
+                }
+              } catch(e) {}
+            }
 
             // Verify email
             let emailVerified = false;
