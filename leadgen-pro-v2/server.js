@@ -958,7 +958,25 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
 
   async function fetchEmails(url) {
     try {
-      const html = await scrapeWithBrightData(url, jobId);
+      // Try direct HTTP first (FREE) — many author sites aren't bot-protected
+      let html = null;
+      try {
+        const resp = await axios.get(url, {
+          timeout: 8000,
+          maxRedirects: 3,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36', 'Accept': 'text/html' },
+          validateStatus: s => s < 400
+        });
+        if (resp.data && typeof resp.data === 'string' && resp.data.length > 500) {
+          html = resp.data;
+        }
+      } catch(e) {}
+
+      // Fallback to BD only if direct HTTP failed
+      if (!html) {
+        html = await scrapeWithBrightData(url, jobId);
+      }
+
       if (!html) return { email: null, website: null, html: null };
       const emails = extractEmails(html);
       const sites = extractRealWebsites(html);
@@ -1047,25 +1065,21 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
 
   saveLog('info', `🌐 ${foundWebsite}`);
 
-  // ── STEP 3: Scrape multiple pages for email (BD only — no Hunter) ──────
-  // Try homepage + /contact + /about + /hire + /speaking in order
+  // ── STEP 3: Smart page scraping — direct HTTP first (free), BD only as fallback ──
   const base = foundWebsite.replace(/\/$/, '');
-  // Max 3 BD calls per author: homepage → /contact → /about
-  const pagesToTry = [
-    base,
-    `${base}/contact`,
-    `${base}/about`,
-  ];
 
-  for (const pageUrl of pagesToTry) {
-    try {
-      const result = await fetchEmails(pageUrl);
-      if (result.email) {
-        const pageName = pageUrl.replace(base, '') || '/';
-        saveLog('success', `📧 Found on ${pageName}: ${result.email}`);
-        return { email: result.email, website: foundWebsite };
-      }
-    } catch(e) {}
+  // Try homepage first
+  const homeResult = await fetchEmails(base);
+  if (homeResult.email) {
+    saveLog('success', `📧 Found on homepage: ${homeResult.email}`);
+    return { email: homeResult.email, website: foundWebsite };
+  }
+
+  // Only try /contact if homepage had no email (skip /about — rarely has email)
+  const contactResult = await fetchEmails(`${base}/contact`);
+  if (contactResult.email) {
+    saveLog('success', `📧 Found on /contact: ${contactResult.email}`);
+    return { email: contactResult.email, website: foundWebsite };
   }
 
   saveLog('info', `⏩ No email found for ${authorName} (website-only)`);
