@@ -2022,13 +2022,19 @@ const PORT = process.env.PORT || 3000;
   try {
     await db.init();
 
-    // Migrations handled by schema in db.js for fresh DBs
-    // For existing PG tables, add columns if missing
+    // Migrations — run on both SQLite and PG to add any missing columns
+    const addColSafe = async (sql) => { try { await db.exec(sql); } catch(e) { /* column already exists */ } };
     if (db._pg) {
-      await db.exec("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_url_index INTEGER DEFAULT 0");
-      await db.exec("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_page INTEGER DEFAULT 1");
-      await db.exec("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS is_non_english INTEGER DEFAULT 0");
-      await db.exec("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS publisher TEXT");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_url_index INTEGER DEFAULT 0");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_page INTEGER DEFAULT 1");
+      await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS is_non_english INTEGER DEFAULT 0");
+      await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS publisher TEXT");
+    } else {
+      // SQLite doesn't support IF NOT EXISTS on ALTER TABLE — use try/catch per column
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN resume_url_index INTEGER DEFAULT 0");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN resume_page INTEGER DEFAULT 1");
+      await addColSafe("ALTER TABLE amazon_leads ADD COLUMN is_non_english INTEGER DEFAULT 0");
+      await addColSafe("ALTER TABLE amazon_leads ADD COLUMN publisher TEXT");
     }
 
     // Migrate ASIN unique index from global → per-job (fixes race condition losing verified leads)
