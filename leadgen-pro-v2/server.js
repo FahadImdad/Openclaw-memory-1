@@ -797,6 +797,12 @@ function parseAmazonNewReleasesHtml(html) {
                     fullArea.match(/(\d+)\s*customer reviews?/i);
     const reviewCount = reviewM ? parseInt(reviewM[1].replace(/,/g, '')) : 0;
 
+    // DEBUG: log raw after-block for first book to see publisher HTML structure
+    if (books.length === 0) {
+      const fs = require('fs');
+      fs.writeFileSync('/tmp/amazon_debug.html', after, 'utf8');
+    }
+
     books.push({ asin, title, author, publisher, publishDate, reviewCount, amazonUrl: `https://www.amazon.com/dp/${asin}` });
   }
 
@@ -1192,6 +1198,15 @@ app.get('/api/version', async (req, res) => {
     deployedAt: process.env.RENDER_SERVICE_ID ? new Date().toISOString() : null,
     buildTime: BUILD_TIME
   });
+});
+
+// GET /api/debug/amazon-html — return raw after-block from first parsed book
+app.get('/api/debug/amazon-html', (req, res) => {
+  try {
+    const fs = require('fs');
+    const html = fs.readFileSync('/tmp/amazon_debug.html', 'utf8');
+    res.set('Content-Type', 'text/plain').send(html);
+  } catch(e) { res.status(404).send('No debug file yet — run a job first'); }
 });
 
 // GET /api/debug/craigslist
