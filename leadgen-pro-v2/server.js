@@ -58,7 +58,7 @@ async function saveLog(jobId, level, message) {
 }
 
 // Scrape URL using Bright Data Web Unlocker (for simple requests like Reddit JSON)
-async function scrapeWithBrightData(url) {
+async function scrapeWithBrightData(url, jobId = null) {
   try {
     const response = await axios.post('https://api.brightdata.com/request', {
       zone: 'web_unlocker_1',
@@ -72,6 +72,10 @@ async function scrapeWithBrightData(url) {
       timeout: 60000,
       transformResponse: [(data) => data]
     });
+    // Track BD usage per job
+    if (jobId) {
+      db.prepare('UPDATE scrape_jobs SET bd_calls = COALESCE(bd_calls, 0) + 1 WHERE id = ?').run(jobId).catch?.(() => {});
+    }
     return response.data;
   } catch (error) {
     console.error('Bright Data error:', error.message);
@@ -884,7 +888,7 @@ async function scrapeAmazonBooks(targetLeads, dateFrom, dateTo, sendEvent) {
 }
 
 // Find author contact info — sequential with early exit to avoid connection exhaustion
-async function findAuthorContact(authorName, bookTitle, saveLog) {
+async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
   // Skip unknown authors — no point searching for "Unknown"
   if (!authorName || authorName === 'Unknown' || authorName.trim().length < 3) {
     saveLog('info', `⏩ Skipping unknown author`);
@@ -914,7 +918,7 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
 
   async function fetchEmails(url) {
     try {
-      const html = await scrapeWithBrightData(url);
+      const html = await scrapeWithBrightData(url, jobId);
       if (!html) return { email: null, website: null, html: null };
       const emails = extractEmails(html);
       const sites = extractRealWebsites(html);
@@ -1288,7 +1292,7 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             }
             // Blocked — fallback to Bright Data (costs money)
             await saveLog(jobId, 'info', `🔄 Direct blocked, using BD for page ${pageNum}...`);
-            const bdHtml = await scrapeWithBrightData(pgUrl);
+            const bdHtml = await scrapeWithBrightData(pgUrl, jobId);
             if (!bdHtml) return [];
             return parseAmazonNewReleasesHtml(bdHtml);
           } catch(e) {
@@ -1467,7 +1471,7 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             await saveLog(jobId, 'info', `📚 Processing: "${title}" by ${author} (${book.reviewCount || 0} reviews)`);
 
             // Find author contact
-            const { email, website } = await findAuthorContact(author, title, async (level, msg) => await saveLog(jobId, level, msg));
+            const { email, website } = await findAuthorContact(author, title, async (level, msg) => await saveLog(jobId, level, msg), jobId);
 
             // Verify email
             let emailVerified = false;
@@ -1497,7 +1501,7 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
                 // Try to confirm: check if this email is mentioned on the author's website
                 if (website) {
                   try {
-                    const siteHtml = await scrapeWithBrightData(website);
+                    const siteHtml = await scrapeWithBrightData(website, jobId);
                     if (siteHtml && siteHtml.toLowerCase().includes(email.toLowerCase())) {
                       emailConfidence = 'high';
                       emailStatus = 'website_confirmed';
@@ -2057,12 +2061,14 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS resume_page INTEGER DEFAULT 1");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS is_non_english INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS publisher TEXT");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS bd_calls INTEGER DEFAULT 0");
     } else {
       // SQLite doesn't support IF NOT EXISTS on ALTER TABLE — use try/catch per column
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN resume_url_index INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN resume_page INTEGER DEFAULT 1");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN is_non_english INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN publisher TEXT");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN bd_calls INTEGER DEFAULT 0");
     }
 
     // Migrate ASIN unique index from global → per-job (fixes race condition losing verified leads)

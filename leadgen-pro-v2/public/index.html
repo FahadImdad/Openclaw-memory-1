@@ -523,7 +523,7 @@
                 <div class="text-gray-600">Loading...</div>
               </div>
               <!-- Stats row -->
-              <div class="grid grid-cols-3 gap-2 mt-2 text-center text-xs">
+              <div class="grid grid-cols-4 gap-2 mt-2 text-center text-xs">
                 <div class="bg-gray-700 rounded p-1.5">
                   <div class="text-gray-400">Processed</div>
                   <div id="task-stat-processed-${job.id}" class="font-bold text-blue-400">${job.total_count}</div>
@@ -535,6 +535,10 @@
                 <div class="bg-gray-700 rounded p-1.5">
                   <div class="text-gray-400">Target</div>
                   <div class="font-bold text-yellow-400">${job.target_leads}</div>
+                </div>
+                <div class="bg-gray-700 rounded p-1.5" title="Bright Data API calls used">
+                  <div class="text-gray-400">💰 BD Cost</div>
+                  <div id="task-stat-bd-${job.id}" class="font-bold text-orange-400">$${((job.bd_calls||0)*0.0015).toFixed(3)}</div>
                 </div>
               </div>
             </div>
@@ -1616,8 +1620,10 @@
           jobs.forEach(job => {
             const processedEl = document.getElementById(`task-stat-processed-${job.id}`);
             const verifiedEl = document.getElementById(`task-stat-verified-${job.id}`);
+            const bdEl = document.getElementById(`task-stat-bd-${job.id}`);
             if (processedEl) processedEl.textContent = job.total_count || 0;
             if (verifiedEl) verifiedEl.textContent = job.verified_count || 0;
+            if (bdEl) bdEl.textContent = `$${((job.bd_calls||0)*0.0015).toFixed(3)}`;
             // Also update the header badge ✅ X/Y and progress bar
             const card = document.getElementById(`task-card-${job.id}`);
             if (card) {
