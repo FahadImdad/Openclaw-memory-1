@@ -938,28 +938,49 @@ async function findAuthorContact(authorName, bookTitle, saveLog) {
     } catch(e) {}
   }
 
-  // ── STEP 2: Guess author website via direct HTTP (FREE — no BD) ──────
-  // Try common domain patterns: firstnamelastname.com, firstname-lastname.com, etc.
+  // ── STEP 2: Find author website FREE — DDG first, domain guess fallback ──
+  // DuckDuckGo HTML doesn't block scrapers → no BD cost
   let foundWebsite = null;
-  const domainCandidates = [
-    `${firstName}${lastName}.com`,
-    `${nameSlug}.com`,
-    `${firstName}-${lastName}.com`,
-    `${firstName}${lastName}.net`,
-    `${nameSlug}.net`,
-  ];
-  for (const domain of domainCandidates) {
-    try {
-      const r = await axios.get(`https://${domain}`, {
-        timeout: 5000, maxRedirects: 2,
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        validateStatus: s => s < 400
-      }).catch(() => null);
-      if (r && r.status < 400) {
-        foundWebsite = `https://${domain}`;
-        break;
-      }
-    } catch(e) {}
+
+  // 2a: DuckDuckGo search (direct HTTP, free)
+  try {
+    const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent('"' + authorName + '" author official website')}`;
+    const resp = await axios.get(ddgUrl, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept-Language': 'en-US,en;q=0.9' },
+      maxRedirects: 2
+    }).catch(() => null);
+    if (resp && resp.data) {
+      const sites = extractRealWebsites(resp.data);
+      foundWebsite = sites.find(s => {
+        try {
+          const host = new URL(s).hostname.toLowerCase().replace(/^www\./, '');
+          return nameParts.some(p => host.includes(p));
+        } catch { return false; }
+      }) || null;
+    }
+  } catch(e) {}
+
+  // 2b: Domain pattern guessing (free direct HTTP) if DDG found nothing
+  if (!foundWebsite) {
+    const domainCandidates = [
+      `${firstName}${lastName}.com`,
+      `${nameSlug}.com`,
+      `${firstName}-${lastName}.com`,
+    ];
+    for (const domain of domainCandidates) {
+      try {
+        const r = await axios.get(`https://${domain}`, {
+          timeout: 4000, maxRedirects: 2,
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+          validateStatus: s => s < 400
+        }).catch(() => null);
+        if (r && r.status < 400) {
+          foundWebsite = `https://${domain}`;
+          break;
+        }
+      } catch(e) {}
+    }
   }
 
   if (!foundWebsite) {
