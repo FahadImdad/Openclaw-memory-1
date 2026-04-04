@@ -1315,11 +1315,11 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
           const CONCURRENCY = 10;
           await saveLog(jobId, 'info', `⚡ Processing ${pageBooks.length} authors with ${CONCURRENCY} concurrent workers...`);
 
-          // Filter out already-seen ASINs (both DB and current run)
+          // Filter out already-seen ASINs (current run in-memory + DB for this job only)
           const newBooks = [];
           for (const book of pageBooks) {
             if (seenAsinsThisRun.has(book.asin)) continue;
-            const exists = await db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(book.asin);
+            const exists = await db.prepare('SELECT id FROM amazon_leads WHERE asin = ? AND job_id = ?').get(book.asin, jobId);
             if (exists) { seenAsinsThisRun.add(book.asin); continue; }
             seenAsinsThisRun.add(book.asin);
             newBooks.push(book);
@@ -1426,8 +1426,8 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               }
             }
 
-            // ASIN dedup — skip entirely if already in DB
-            const asinExists = await db.prepare('SELECT id FROM amazon_leads WHERE asin = ?').get(asin);
+            // ASIN dedup — skip if already in DB for this job
+            const asinExists = await db.prepare('SELECT id FROM amazon_leads WHERE asin = ? AND job_id = ?').get(asin, jobId);
             if (asinExists) {
               await saveLog(jobId, 'info', `⏭️ SKIP (seen ASIN): ${asin}`);
               return;
@@ -1518,13 +1518,20 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
 
             // Save to DB — both verified email leads AND website-only leads
             totalCount++;
+            let insertResult;
             try {
-              await db.prepare(
-                `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate, is_non_english, publisher)
+              insertResult = await db.prepare(
+                `INSERT OR IGNORE INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate, is_non_english, publisher)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
               ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, emailConfidence || null, hasRealWebsite ? website : null, amazonUrl, asin, 0, isNonEnglish ? 1 : 0, book.publisher || null);
             } catch (dbErr) {
-              await saveLog(jobId, 'warning', `⚠️ DB insert skipped (dupe ASIN): ${asin}`);
+              await saveLog(jobId, 'warning', `⚠️ DB insert error: ${dbErr.message}`);
+              totalCount--;
+              return;
+            }
+            // INSERT OR IGNORE: if 0 rows changed, a concurrent worker already inserted this ASIN
+            if (!insertResult || insertResult.changes === 0) {
+              await saveLog(jobId, 'info', `⏭️ SKIP (race-dupe ASIN): ${asin}`);
               totalCount--;
               return;
             }
@@ -2023,6 +2030,12 @@ const PORT = process.env.PORT || 3000;
       await db.exec("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS is_non_english INTEGER DEFAULT 0");
       await db.exec("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS publisher TEXT");
     }
+
+    // Migrate ASIN unique index from global → per-job (fixes race condition losing verified leads)
+    try {
+      await db.exec("DROP INDEX IF EXISTS idx_amazon_asin");
+      await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_job_asin ON amazon_leads(job_id, asin)");
+    } catch(e) { console.warn('Index migration warning:', e.message); }
 
     // Find jobs that were running when server last died
     const staleJobs = await db.prepare(`SELECT * FROM scrape_jobs WHERE status = 'running'`).all();

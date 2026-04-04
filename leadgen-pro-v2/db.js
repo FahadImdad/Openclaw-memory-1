@@ -184,7 +184,7 @@ if (DATABASE_URL) {
       is_non_english INTEGER DEFAULT 0,
       scraped_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_asin ON amazon_leads(asin);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_job_asin ON amazon_leads(job_id, asin);
     CREATE TABLE IF NOT EXISTS intent_leads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       job_id INTEGER REFERENCES scrape_jobs(id),
