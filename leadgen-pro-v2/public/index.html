@@ -371,6 +371,9 @@
           </div>
         </div>
 
+        <!-- Debug Status (visible always) -->
+        <div id="debugStatus-amazon" class="mt-2 text-xs text-yellow-400 font-mono hidden"></div>
+
         <!-- Progress Bar -->
         <div id="progressBar-amazon" class="hidden mt-3">
           <div class="flex justify-between text-xs text-gray-400 mb-1">
@@ -1423,12 +1426,25 @@
       }
     }
 
+    function dbg(msg, color = '#facc15') {
+      const el = document.getElementById('debugStatus-amazon');
+      if (!el) return;
+      el.classList.remove('hidden');
+      el.innerHTML += `<div style="color:${color}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+    }
+
     async function startAmazonSearch() {
+      const dbgEl = document.getElementById('debugStatus-amazon');
+      if (dbgEl) { dbgEl.innerHTML = ''; dbgEl.classList.remove('hidden'); }
+
       const dateFrom = document.getElementById('dateFrom-amazon').value;
       const dateTo = document.getElementById('dateTo-amazon').value;
       currentAmazonTarget = parseInt(document.getElementById('targetLeads-amazon').value);
 
+      dbg(`▶ Button clicked — dateFrom="${dateFrom}" dateTo="${dateTo}" target=${currentAmazonTarget}`);
+
       if (!dateFrom || !dateTo) { 
+        dbg('❌ STOPPED: date fields are empty!', '#f87171');
         alert('⚠️ Please select a date range!\n\nChoose a "From" and "To" date above the button, then try again.');
         return; 
       }
@@ -1452,13 +1468,16 @@
       updateAmazonStats();
 
       try {
+        dbg('📡 Sending POST /api/amazon...');
         const res = await fetch('/api/amazon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dateFrom, dateTo, targetLeads: currentAmazonTarget })
         });
+        dbg(`📥 Response status: ${res.status}`);
         if (!res.ok) throw new Error(`Server error ${res.status}: ${await res.text()}`);
         const data = await res.json();
+        dbg(`✅ Got jobId: ${data.jobId}`, '#4ade80');
         const jobId = data.jobId;
         if (!jobId) throw new Error('No task ID returned: ' + JSON.stringify(data));
 
@@ -1480,6 +1499,8 @@
         _minimized[jobId] = true; // expanded by default
         _lastJobsHash = '';
 
+        dbg(`🃏 Task card injected — loading content...`, '#4ade80');
+
         // Load content into the card
         setTimeout(() => loadTaskCardContent(jobId, 'amazon', 'amazon'), 500);
         startPolling(jobId, 'amazon');
@@ -1490,6 +1511,7 @@
       } catch (error) {
         console.error('Amazon search error:', error);
         addLog('❌ Error: ' + error.message, 'red', 'amazon');
+        dbg(`❌ ERROR: ${error.message}`, '#f87171');
         alert('❌ Failed to start search: ' + error.message + '\n\nThe server may be waking up (Render free tier). Wait 30 seconds and try again.');
         document.getElementById('amazonBtn').disabled = false;
         document.getElementById('amazonBtn').textContent = '🚀 Find Authors';
