@@ -449,12 +449,21 @@
           const expanded = _minimized[job.id] === true || (job.status === 'running');
           if (expanded) loadTaskCardContent(job.id, job.framework, framework);
         } else {
-          // Card exists — only reload content if status changed (running→complete etc)
+          // Card exists — re-render if status changed
           const prevStatus = existing.dataset.status;
           if (prevStatus !== job.status) {
             existing.outerHTML = renderJobCard(job, framework);
             const expanded = _minimized[job.id] === true || (job.status === 'running');
             if (expanded) loadTaskCardContent(job.id, job.framework, framework);
+          } else if (job.status === 'running') {
+            // Running job — refresh leads/logs on every loadJobs call (debounced 3s)
+            clearTimeout(window[`_refreshTimer_${job.id}`]);
+            window[`_refreshTimer_${job.id}`] = setTimeout(() => {
+              const detail = document.getElementById(`task-detail-${job.id}`);
+              if (detail && detail.style.display !== 'none') {
+                loadTaskCardContent(job.id, job.framework, framework);
+              }
+            }, 500);
           }
           // Always tag with current status for next check
           const card = document.getElementById(`task-card-${job.id}`);
