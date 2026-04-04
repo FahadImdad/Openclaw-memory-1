@@ -41,6 +41,7 @@ const SCHEMA_PG = `
     publisher TEXT,
     is_duplicate INTEGER DEFAULT 0,
     is_non_english INTEGER DEFAULT 0,
+    book_format TEXT DEFAULT 'Paperback',
     scraped_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(asin)
   );

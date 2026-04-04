@@ -762,13 +762,24 @@ const MAX_PAGES_PER_URL = 95;
 
 function buildAmazonUrl(dateFrom, dateTo, page = 1) { return null; } // legacy stub
 
-function getAmazonUrl(urlIndex, page) {
+// Amazon format filter codes:
+// Paperback: p_n_feature_browse-bin:2656022011
+// Hardcover: p_n_feature_browse-bin:2656022011 (same node, different value)
+// Kindle:    p_n_feature_browse-bin:618073011
+// No filter = all formats
+const FORMAT_FILTERS = [
+  { code: '2656022011', name: 'Paperback' },
+  { code: '2656022011', name: 'Hardcover' }, // will detect from HTML
+  { code: '618073011',  name: 'Kindle' },
+];
+
+function getAmazonUrl(urlIndex, page, formatFilter = '') {
   const cat = AMAZON_CATEGORY_NODES[urlIndex % AMAZON_CATEGORY_NODES.length];
   const pg = Math.max(1, Math.min(page, MAX_PAGES_PER_URL));
-  // Paperback only + English language filter (p_n_feature_browse-bin:2656022011 = paperback, p_n_feature_browse-bin:2656022011)
-  // p_36%3A-1000 is not valid; use language filter: p_n_feature_browse-bin:2656022011 for paperback
-  // English language: add &language=en to filter Amazon results
-  return `https://www.amazon.com/s?i=stripbooks&rh=n%3A${cat.id}%2Cp_n_feature_browse-bin%3A2656022011&page=${pg}&s=date-desc-rank&language=en`;
+  // No format filter — get all formats, detect from HTML
+  // language=en for English only
+  const formatParam = formatFilter ? `%2Cp_n_feature_browse-bin%3A${formatFilter}` : '';
+  return `https://www.amazon.com/s?i=stripbooks&rh=n%3A${cat.id}${formatParam}&page=${pg}&s=date-desc-rank&language=en`;
 }
 
 // Parse Amazon search results HTML (Web Unlocker) into book objects
@@ -829,7 +840,14 @@ function parseAmazonNewReleasesHtml(html) {
                     fullArea.match(/(\d+)\s*customer reviews?/i);
     const reviewCount = reviewM ? parseInt(reviewM[1].replace(/,/g, '')) : 0;
 
-    books.push({ asin, title, author, publisher, publishDate, reviewCount, amazonUrl: `https://www.amazon.com/dp/${asin}` });
+    // Detect book format from listing card
+    const formatArea = after.substring(0, 400);
+    let bookFormat = 'Unknown';
+    if (/Kindle|eBook|Digital/i.test(formatArea)) bookFormat = 'Kindle';
+    else if (/Hardcover/i.test(formatArea)) bookFormat = 'Hardcover';
+    else if (/Paperback/i.test(formatArea)) bookFormat = 'Paperback';
+
+    books.push({ asin, title, author, publisher, publishDate, reviewCount, bookFormat, amazonUrl: `https://www.amazon.com/dp/${asin}` });
   }
 
   return books;
@@ -1157,19 +1175,43 @@ app.get('/api/export/:jobId', async (req, res) => {
   const job = await db.prepare('SELECT * FROM scrape_jobs WHERE id = ?').get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
-  let leads, headers, rows;
   if (framework === 'amazon') {
-    leads = await db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
-    headers = ['#','Author','Book Title','Publisher','Published','Reviews','Email','Email Status','Website','Amazon URL','Scraped At'];
-    rows = leads.map((l,i) => [i+1, l.author, l.book_title, l.publisher||'', l.publish_date||'', l.review_count||0, l.email||'', l.email_status||'', l.website||'', l.amazon_url, l.scraped_at]);
-  } else {
-    leads = await db.prepare(`SELECT * FROM intent_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
-    headers = ['#','Name','Title','Email','Email Status','Phone','WhatsApp','Budget','City','Source','URL','Posted Date','Scraped At'];
-    rows = leads.map((l,i) => [i+1, l.name||'', l.title||'', l.email||'', l.email_status||'', l.phone||'', l.whatsapp||'', l.budget||'', l.city||'', l.source||'', l.url, l.posted_date||'', l.scraped_at]);
+    const leads = await db.prepare(`SELECT * FROM amazon_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
+
+    // Split into two sheets per Suleman's requirement:
+    // Sheet 1: Paperback + Hardcover (has Publisher)
+    // Sheet 2: Kindle/Ebook (no Publisher)
+    const printLeads = leads.filter(l => !l.book_format || l.book_format === 'Paperback' || l.book_format === 'Hardcover' || l.book_format === 'Unknown');
+    const kindleLeads = leads.filter(l => l.book_format === 'Kindle');
+
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1 — Paperback & Hardcover (with Publisher)
+    const printHeaders = ['#','Author','Book Title','Format','Publisher','Published','Reviews','Email','Email Confidence','Website','Amazon URL'];
+    const printRows = printLeads.map((l,i) => [i+1, l.author, l.book_title, l.book_format||'Paperback', l.publisher||'', l.publish_date||'', l.review_count||0, l.email||'', l.email_confidence||'', l.website||'', l.amazon_url]);
+    const ws1 = XLSX.utils.aoa_to_sheet([printHeaders, ...printRows]);
+    XLSX.utils.book_append_sheet(wb, ws1, 'Paperback & Hardcover');
+
+    // Sheet 2 — Kindle/Ebook (no Publisher)
+    const kindleHeaders = ['#','Author','Book Title','Published','Reviews','Email','Email Confidence','Website','Amazon URL'];
+    const kindleRows = kindleLeads.map((l,i) => [i+1, l.author, l.book_title, l.publish_date||'', l.review_count||0, l.email||'', l.email_confidence||'', l.website||'', l.amazon_url]);
+    const ws2 = XLSX.utils.aoa_to_sheet([kindleHeaders, ...kindleRows]);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Kindle & eBook');
+
+    const filename = `amazon_leads_${job.date_from}_to_${job.date_to}.xlsx`;
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(buf);
   }
 
+  // Intent leads — CSV as before
+  const leads = await db.prepare(`SELECT * FROM intent_leads WHERE job_id = ? ${verifiedFilter} ORDER BY id`).all(jobId);
+  const headers = ['#','Name','Title','Email','Email Status','Phone','WhatsApp','Budget','City','Source','URL','Posted Date','Scraped At'];
+  const rows = leads.map((l,i) => [i+1, l.name||'', l.title||'', l.email||'', l.email_status||'', l.phone||'', l.whatsapp||'', l.budget||'', l.city||'', l.source||'', l.url, l.posted_date||'', l.scraped_at]);
   const csv = [headers, ...rows].map(row => row.map(c => `"${String(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
-  const filename = `${framework}_leads_${job.date_from}_to_${job.date_to}.csv`;
+  const filename = `intent_leads_${job.date_from}_to_${job.date_to}.csv`;
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send(csv);
@@ -1444,8 +1486,8 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               return;
             }
 
-            // Review filter — skip books with more than 10 reviews (already established authors)
-            const MAX_REVIEWS = 10;
+            // Review filter — skip books with more than 5 reviews (Suleman's requirement)
+            const MAX_REVIEWS = 5;
             if (book.reviewCount > MAX_REVIEWS) {
               await saveLog(jobId, 'info', `⏭️ SKIP (${book.reviewCount} reviews > ${MAX_REVIEWS}): ${title.substring(0, 50)}`);
               return;
@@ -1593,10 +1635,10 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             let insertResult;
             try {
               insertResult = await db.prepare(
-                `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate, is_non_english, publisher)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate, is_non_english, publisher, book_format)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (job_id, asin) DO NOTHING`
-              ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, emailConfidence || null, hasRealWebsite ? website : null, amazonUrl, asin, 0, isNonEnglish ? 1 : 0, book.publisher || null);
+              ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, emailConfidence || null, hasRealWebsite ? website : null, amazonUrl, asin, 0, isNonEnglish ? 1 : 0, book.publisher || null, book.bookFormat || 'Paperback');
             } catch (dbErr) {
               await saveLog(jobId, 'warning', `⚠️ DB insert error: ${dbErr.message}`);
               totalCount--;
@@ -2106,6 +2148,7 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS is_non_english INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS publisher TEXT");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS bd_calls INTEGER DEFAULT 0");
+      await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS book_format TEXT DEFAULT 'Paperback'");
     } else {
       // SQLite doesn't support IF NOT EXISTS on ALTER TABLE — use try/catch per column
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN resume_url_index INTEGER DEFAULT 0");
@@ -2113,6 +2156,7 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN is_non_english INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN publisher TEXT");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN bd_calls INTEGER DEFAULT 0");
+      await addColSafe("ALTER TABLE amazon_leads ADD COLUMN book_format TEXT DEFAULT 'Paperback'");
     }
 
     // Migrate ASIN unique constraint from global → per-job
