@@ -408,6 +408,8 @@
       const activeBtn = document.getElementById('tab-' + tab);
       activeBtn.classList.remove('bg-gray-700', 'text-gray-300', 'border-transparent');
       activeBtn.classList.add('bg-blue-600', 'text-white', 'border-blue-400');
+      // Re-apply default dates in case they weren't set while tab was hidden
+      setDefaultDates();
     }
 
     // ===================== TASK LIST =====================
@@ -1426,7 +1428,10 @@
       const dateTo = document.getElementById('dateTo-amazon').value;
       currentAmazonTarget = parseInt(document.getElementById('targetLeads-amazon').value);
 
-      if (!dateFrom || !dateTo) { alert('Please select a date range'); return; }
+      if (!dateFrom || !dateTo) { 
+        alert('⚠️ Please select a date range!\n\nChoose a "From" and "To" date above the button, then try again.');
+        return; 
+      }
 
       // Reset
       amazonLeads = [];
@@ -1452,6 +1457,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ dateFrom, dateTo, targetLeads: currentAmazonTarget })
         });
+        if (!res.ok) throw new Error(`Server error ${res.status}: ${await res.text()}`);
         const data = await res.json();
         const jobId = data.jobId;
         if (!jobId) throw new Error('No task ID returned: ' + JSON.stringify(data));
@@ -1484,6 +1490,7 @@
       } catch (error) {
         console.error('Amazon search error:', error);
         addLog('❌ Error: ' + error.message, 'red', 'amazon');
+        alert('❌ Failed to start search: ' + error.message + '\n\nThe server may be waking up (Render free tier). Wait 30 seconds and try again.');
         document.getElementById('amazonBtn').disabled = false;
         document.getElementById('amazonBtn').textContent = '🚀 Find Authors';
       }
