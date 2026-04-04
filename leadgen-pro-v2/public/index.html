@@ -428,7 +428,7 @@
       return `<div class="bg-gray-700 rounded-full h-1.5 mt-1"><div class="${color} h-1.5 rounded-full transition-all task-progress-fill" style="width:${pct}%"></div></div>`;
     }
 
-    async function loadJobs(framework) {
+    async function loadJobs(framework, skipFormShow = false) {
       const res = await fetch('/api/jobs');
       const jobs = await res.json();
       const filtered = jobs.filter(j => j.framework === framework);
@@ -436,7 +436,7 @@
 
       if (filtered.length === 0) {
         container.innerHTML = '<div class="text-gray-500 text-sm">No previous tasks.</div>';
-        showScrapeForm(framework);
+        if (!skipFormShow) showScrapeForm(framework);
         return;
       }
 
@@ -1454,8 +1454,10 @@
         const jobId = data.jobId;
         if (!jobId) throw new Error('No job ID returned: ' + JSON.stringify(data));
         hideScrapeForm('amazon');
-        _lastJobsHash = ''; // force hash mismatch so next poll triggers reload
-        await loadJobs('amazon');
+        _lastJobsHash = '';
+        // Small delay to let DB write propagate before reloading
+        await new Promise(r => setTimeout(r, 800));
+        await loadJobs('amazon', true); // skipFormShow — task was just created
         startPolling(jobId, 'amazon');
       } catch (error) {
         console.error('Amazon search error:', error);
