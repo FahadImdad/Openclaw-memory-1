@@ -69,7 +69,7 @@ async function scrapeWithBrightData(url, jobId = null) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${BRIGHTDATA_API_KEY}`
       },
-      timeout: 60000,
+      timeout: 20000,
       transformResponse: [(data) => data]
     });
     // Track BD usage per job
@@ -2085,9 +2085,16 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN bd_calls INTEGER DEFAULT 0");
     }
 
-    // Migrate ASIN unique index from global → per-job (fixes race condition losing verified leads)
+    // Migrate ASIN unique constraint from global → per-job
+    try {
+      // Drop old global unique constraint (may be named differently on PG vs SQLite)
+      await db.exec("ALTER TABLE amazon_leads DROP CONSTRAINT IF EXISTS amazon_leads_asin_key");
+    } catch(e) {}
     try {
       await db.exec("DROP INDEX IF EXISTS idx_amazon_asin");
+    } catch(e) {}
+    try {
+      // Add per-job unique constraint
       await db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_amazon_job_asin ON amazon_leads(job_id, asin)");
     } catch(e) { console.warn('Index migration warning:', e.message); }
 
