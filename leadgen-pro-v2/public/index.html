@@ -610,8 +610,12 @@
               let ts = '';
               if (l.created_at) {
                 const raw = l.created_at || '';
-                // Handle both SQLite "2026-01-01 12:00:00" and Neon "2026-01-01 12:00:00+00"
-                const d = new Date(raw.includes('+') || raw.includes('Z') ? raw.replace(' ','T') : raw.replace(' ','T') + 'Z');
+                // Neon: "2026-01-01 12:00:00.123456+00" → need +00:00 not +00
+                // SQLite: "2026-01-01 12:00:00" → append Z
+                let normalized = raw.replace(' ', 'T');
+                if (normalized.match(/\+\d{2}$/)) normalized += ':00'; // +00 → +00:00
+                else if (!normalized.includes('+') && !normalized.includes('Z')) normalized += 'Z';
+                const d = new Date(normalized);
                 ts = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
               }
               return `<div class="${colors[l.level]||'text-gray-400'}">[${ts}] ${escapeHtml(l.message)}</div>`;
