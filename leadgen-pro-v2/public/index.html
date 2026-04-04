@@ -609,7 +609,9 @@
             logEl.innerHTML = logs.map(l => {
               let ts = '';
               if (l.created_at) {
-                const d = new Date(l.created_at.replace(' ','T') + 'Z');
+                const raw = l.created_at || '';
+                // Handle both SQLite "2026-01-01 12:00:00" and Neon "2026-01-01 12:00:00+00"
+                const d = new Date(raw.includes('+') || raw.includes('Z') ? raw.replace(' ','T') : raw.replace(' ','T') + 'Z');
                 ts = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
               }
               return `<div class="${colors[l.level]||'text-gray-400'}">[${ts}] ${escapeHtml(l.message)}</div>`;
