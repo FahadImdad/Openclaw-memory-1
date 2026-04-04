@@ -1530,8 +1530,9 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             let insertResult;
             try {
               insertResult = await db.prepare(
-                `INSERT OR IGNORE INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate, is_non_english, publisher)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                `INSERT INTO amazon_leads (job_id, author, book_title, publish_date, review_count, email, email_verified, email_status, email_confidence, website, amazon_url, asin, is_duplicate, is_non_english, publisher)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (job_id, asin) DO NOTHING`
               ).run(jobId, author, title, book.publishDate || null, book.reviewCount || 0, email || null, emailVerified ? 1 : 0, emailStatus, emailConfidence || null, hasRealWebsite ? website : null, amazonUrl, asin, 0, isNonEnglish ? 1 : 0, book.publisher || null);
             } catch (dbErr) {
               await saveLog(jobId, 'warning', `⚠️ DB insert error: ${dbErr.message}`);
