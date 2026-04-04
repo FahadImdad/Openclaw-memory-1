@@ -1235,6 +1235,7 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
       let consecutiveEmpty = 0;
       let urlIndex = existingCounts?.resume_url_index || 0;
       const seenAsinsThisRun = new Set();
+      let cycleStartCount = verifiedCount; // track leads per full cycle to detect exhaustion
       if (resuming) await saveLog(jobId, 'info', `📍 Resuming from category ${urlIndex + 1}/${AMAZON_CATEGORY_NODES.length}, page ${page_num}`);
       await saveLog(jobId, 'info', `📚 Total categories: ${AMAZON_CATEGORY_NODES.length} × ${MAX_PAGES_PER_URL} pages = ${AMAZON_CATEGORY_NODES.length * MAX_PAGES_PER_URL * 50} max books`);
 
@@ -1279,9 +1280,18 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             page_num = 1;
             consecutiveEmpty = 0;
             if (urlIndex >= AMAZON_CATEGORY_NODES.length) {
+              // Completed one full cycle of all categories — check if we found anything new
+              const newLeadsThisCycle = verifiedCount - (cycleStartCount || 0);
+              if (newLeadsThisCycle === 0) {
+                // No new leads found in entire cycle — all books exhausted
+                keepGoing = false;
+                await saveLog(jobId, 'warning', `⚠️ No more verified leads available in this date range. Found ${verifiedCount}/${targetLeads} leads total.`);
+                break;
+              }
+              cycleStartCount = verifiedCount;
               urlIndex = 0;
-              await saveLog(jobId, 'info', `🔄 Completed all ${AMAZON_CATEGORY_NODES.length} category URLs — waiting 10min then restarting...`);
-              await new Promise(r => setTimeout(r, 10 * 60 * 1000));
+              await saveLog(jobId, 'info', `🔄 Completed all ${AMAZON_CATEGORY_NODES.length} categories — found ${newLeadsThisCycle} new leads this cycle. Restarting...`);
+              await new Promise(r => setTimeout(r, 5 * 60 * 1000));
               seenAsinsThisRun.clear();
             } else {
               await saveLog(jobId, 'info', `📂 Moving to next category URL ${urlIndex+1}/${AMAZON_CATEGORY_NODES.length}...`);
@@ -1552,7 +1562,10 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
         `UPDATE scrape_jobs SET status = 'complete', verified_count = ?, total_count = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`
       ).run(verifiedCount, totalCount, jobId);
 
-      await saveLog(jobId, 'success', `\n🎯 AMAZON COMPLETE! Verified: ${verifiedCount} / ${targetLeads} | Total processed: ${totalCount}`);
+      const completionMsg = verifiedCount >= targetLeads
+        ? `\n🎯 TASK COMPLETE! ✅ ${verifiedCount} verified leads collected`
+        : `\n⚠️ TASK ENDED — No more leads available in this date range. Found ${verifiedCount}/${targetLeads} verified leads.`;
+      await saveLog(jobId, verifiedCount >= targetLeads ? 'success' : 'warning', completionMsg);
 
       // Notify via OpenClaw webhook (WhatsApp message to Fahad)
       try {
