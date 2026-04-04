@@ -765,9 +765,10 @@ function buildAmazonUrl(dateFrom, dateTo, page = 1) { return null; } // legacy s
 function getAmazonUrl(urlIndex, page) {
   const cat = AMAZON_CATEGORY_NODES[urlIndex % AMAZON_CATEGORY_NODES.length];
   const pg = Math.max(1, Math.min(page, MAX_PAGES_PER_URL));
-  // Filter to paperback only (p_n_feature_browse-bin:2656022011)
-  // Paperback listings include publisher info in the card — ebook-only authors are naturally excluded
-  return `https://www.amazon.com/s?i=stripbooks&rh=n%3A${cat.id}%2Cp_n_feature_browse-bin%3A2656022011&page=${pg}&s=date-desc-rank`;
+  // Paperback only + English language filter (p_n_feature_browse-bin:2656022011 = paperback, p_n_feature_browse-bin:2656022011)
+  // p_36%3A-1000 is not valid; use language filter: p_n_feature_browse-bin:2656022011 for paperback
+  // English language: add &language=en to filter Amazon results
+  return `https://www.amazon.com/s?i=stripbooks&rh=n%3A${cat.id}%2Cp_n_feature_browse-bin%3A2656022011&page=${pg}&s=date-desc-rank&language=en`;
 }
 
 // Parse Amazon search results HTML (Web Unlocker) into book objects
@@ -1432,6 +1433,12 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               /\bEdizione\b/i, /\bUitgave\b/i,
             ];
             const isNonEnglish = nonEnglishPatterns.some(p => p.test(title));
+
+            // Skip non-English books — Suleman's services are English market only
+            if (isNonEnglish) {
+              await saveLog(jobId, 'info', `⏭️ SKIP (non-English): ${title.substring(0, 60)}`);
+              return;
+            }
 
             // Review filter — skip books with more than 10 reviews (already established authors)
             const MAX_REVIEWS = 10;
