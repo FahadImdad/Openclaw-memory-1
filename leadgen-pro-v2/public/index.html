@@ -1449,23 +1449,38 @@
         return; 
       }
 
-      // Reset
-      amazonLeads = [];
-      amazonStats = { books: 0, emails: 0, websites: 0 };
-      document.getElementById('amazonResultsTable').innerHTML = '';
-      document.getElementById('amazonStatusBar').classList.remove('hidden');
-      document.getElementById('amazonExportBar').classList.add('hidden');
-      document.getElementById('amazonLogContainer').innerHTML = '<div class="text-purple-400">🚀 Starting Amazon Author Lead Gen...</div>';
-      document.getElementById('amazonBtn').disabled = true;
-      document.getElementById('amazonBtn').textContent = '⏳ Searching...';
-      document.getElementById('amazonSpinner').classList.remove('hidden');
+      // Reset — all wrapped in try/catch so any null-deref is visible
+      try {
+        amazonLeads = [];
+        amazonStats = { books: 0, emails: 0, websites: 0 };
+        const resultsTable = document.getElementById('amazonResultsTable');
+        if (resultsTable) resultsTable.innerHTML = '';
+        const statusBar = document.getElementById('amazonStatusBar');
+        if (statusBar) statusBar.classList.remove('hidden');
+        const exportBar = document.getElementById('amazonExportBar');
+        if (exportBar) exportBar.classList.add('hidden');
+        const logContainer = document.getElementById('amazonLogContainer');
+        if (logContainer) logContainer.innerHTML = '<div class="text-purple-400">🚀 Starting Amazon Author Lead Gen...</div>';
+        document.getElementById('amazonBtn').disabled = true;
+        document.getElementById('amazonBtn').textContent = '⏳ Searching...';
+        const spinner = document.getElementById('amazonSpinner');
+        if (spinner) spinner.classList.remove('hidden');
 
-      // Show & reset progress bar
-      const pBar = document.getElementById('progressBar-amazon');
-      pBar.classList.remove('hidden');
-      document.getElementById('progressText-amazon').textContent = `0 / ${currentAmazonTarget}`;
-      document.getElementById('progressFill-amazon').style.width = '0%';
-      updateAmazonStats();
+        // Show & reset progress bar
+        const pBar = document.getElementById('progressBar-amazon');
+        if (pBar) pBar.classList.remove('hidden');
+        const progressText = document.getElementById('progressText-amazon');
+        if (progressText) progressText.textContent = `0 / ${currentAmazonTarget}`;
+        const progressFill = document.getElementById('progressFill-amazon');
+        if (progressFill) progressFill.style.width = '0%';
+        dbg('✅ UI reset done — calling API...', '#4ade80');
+        updateAmazonStats();
+      } catch(uiErr) {
+        dbg(`❌ UI reset crashed: ${uiErr.message}`, '#f87171');
+        document.getElementById('amazonBtn').disabled = false;
+        document.getElementById('amazonBtn').textContent = '🚀 Find Authors';
+        return;
+      }
 
       try {
         dbg('📡 Sending POST /api/amazon...');
