@@ -1636,36 +1636,44 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               return;
             }
 
-            // Run SMTP verify + Google Books in PARALLEL (saves ~3-5 sec per author)
-            if (email) await saveLog(jobId, 'info', `📧 SMTP verify: ${email}...`);
-            const [smtpResult, gbResult] = await Promise.all([
-              // SMTP verification
-              email ? verifyEmail(email) : Promise.resolve(null),
-              // Google Books publisher + date
-              (!book.publisher || !book.publishDate)
-                ? axios.get(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title.substring(0,50))}+inauthor:${encodeURIComponent(author)}&maxResults=1`, { timeout: 6000 }).catch(() => null)
-                : Promise.resolve(null)
-            ]);
+            // Classify email confidence + fetch Google Books in parallel
+            const gbPromise = (!book.publisher || !book.publishDate)
+              ? axios.get(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title.substring(0,50))}+inauthor:${encodeURIComponent(author)}&maxResults=1`, { timeout: 6000 }).catch(() => null)
+              : Promise.resolve(null);
 
-            // Process SMTP result
             let emailVerified = false;
             let emailStatus = null;
             let emailConfidence = null;
-            if (email && smtpResult) {
-              if (smtpResult.valid && smtpResult.status === 'verified') {
-                emailVerified = true; emailStatus = 'verified'; emailConfidence = 'high';
-                await saveLog(jobId, 'success', `✅ HIGH: SMTP inbox confirmed (${email})`);
-              } else if (smtpResult.valid && smtpResult.status === 'catch_all') {
-                emailVerified = true; emailStatus = 'catch_all'; emailConfidence = 'medium';
-                await saveLog(jobId, 'info', `🟡 MEDIUM: catch-all server (${email})`);
-              } else if (smtpResult.valid) {
-                emailVerified = true; emailStatus = smtpResult.status; emailConfidence = 'medium';
-                await saveLog(jobId, 'info', `🟡 MEDIUM: SMTP inconclusive (${email})`);
+
+            if (email) {
+              const emailLocal = (email.split('@')[0] || '').toLowerCase();
+              const emailDomain = (email.split('@')[1] || '').toLowerCase();
+              const authorNameParts = author.toLowerCase().replace(/[^a-z\s]/g,'').split(/\s+/).filter(p=>p.length>2);
+              const emailOnAuthorDomain = authorNameParts.some(part => emailDomain.includes(part));
+              const GENERIC_DOMAINS = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','me.com','mac.com','aol.com','protonmail.com'];
+              const isGenericDomain = GENERIC_DOMAINS.includes(emailDomain);
+              const localHasAuthorName = authorNameParts.some(part => emailLocal.includes(part));
+
+              if (emailOnAuthorDomain) {
+                // e.g. alain@alainsamson.com — on their own domain → HIGH
+                emailVerified = true; emailStatus = 'author_domain'; emailConfidence = 'high';
+                await saveLog(jobId, 'success', `✅ HIGH (author domain): ${email}`);
+              } else if (!isGenericDomain) {
+                // Custom domain email not matching author name — still likely theirs
+                emailVerified = true; emailStatus = 'author_domain'; emailConfidence = 'high';
+                await saveLog(jobId, 'success', `✅ HIGH (custom domain): ${email}`);
+              } else if (isGenericDomain && localHasAuthorName) {
+                // Gmail/Yahoo with author name — medium, try to confirm on website
+                emailVerified = true; emailStatus = 'name_match'; emailConfidence = 'medium';
+                await saveLog(jobId, 'info', `🟡 MEDIUM (name match): ${email}`);
               } else {
-                emailVerified = false; emailStatus = smtpResult.status || 'invalid'; emailConfidence = 'low';
-                await saveLog(jobId, 'warning', `❌ SMTP rejected (${email})`);
+                // Generic email, no name match — low quality, skip
+                emailVerified = false; emailStatus = 'unverified'; emailConfidence = 'low';
+                await saveLog(jobId, 'warning', `❌ SKIP (unverified generic): ${email}`);
               }
             }
+
+            const gbResult = await gbPromise;
 
             // Process Google Books result
             if (gbResult?.data?.items?.[0]?.volumeInfo) {
