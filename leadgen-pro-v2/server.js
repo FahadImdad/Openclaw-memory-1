@@ -170,6 +170,9 @@ Return this exact JSON format:
   }
 }
 
+// MX record cache — avoid duplicate DNS lookups for same domain
+const mxCache = new Map();
+
 // Verify email via free SMTP check (no API key needed)
 // Also detects catch-all servers to avoid false positives
 async function verifyEmail(email) {
@@ -180,7 +183,11 @@ async function verifyEmail(email) {
 
   async function smtpCheck(testEmail) {
     try {
-      const mx = await dns.resolveMx(domain);
+      let mx = mxCache.get(domain);
+      if (!mx) {
+        mx = await dns.resolveMx(domain);
+        if (mx && mx.length > 0) mxCache.set(domain, mx);
+      }
       if (!mx || mx.length === 0) return { valid: false, status: 'no_mx' };
       mx.sort((a, b) => a.priority - b.priority);
       const mxHost = mx[0].exchange;
@@ -1600,36 +1607,6 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               } catch(e) {}
             }
 
-            // Verify email via free SMTP check
-            let emailVerified = false;
-            let emailStatus = null;
-            let emailConfidence = null;
-            if (email) {
-              await saveLog(jobId, 'info', `📧 SMTP verify: ${email}...`);
-              const smtpResult = await verifyEmail(email);
-              if (smtpResult.valid && smtpResult.status === 'verified') {
-                emailVerified = true;
-                emailStatus = 'verified';
-                emailConfidence = 'high';
-                await saveLog(jobId, 'success', `✅ HIGH: SMTP verified inbox confirmed (${email})`);
-              } else if (smtpResult.valid && smtpResult.status === 'catch_all') {
-                emailVerified = true;
-                emailStatus = 'catch_all';
-                emailConfidence = 'medium';
-                await saveLog(jobId, 'info', `🟡 MEDIUM: catch-all server, inbox unconfirmed (${email})`);
-              } else if (smtpResult.valid) {
-                emailVerified = true;
-                emailStatus = smtpResult.status;
-                emailConfidence = 'medium';
-                await saveLog(jobId, 'info', `🟡 MEDIUM: SMTP inconclusive (${email})`);
-              } else {
-                emailVerified = false;
-                emailStatus = smtpResult.status || 'invalid';
-                emailConfidence = 'low';
-                await saveLog(jobId, 'warning', `❌ SKIP: SMTP rejected (${email})`);
-              }
-            }
-
             // Website check
             const hasRealWebsite = website ? isRealAuthorWebsite(website) : false;
 
@@ -1639,36 +1616,50 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               return;
             }
 
+            // Run SMTP verify + Google Books in PARALLEL (saves ~3-5 sec per author)
+            if (email) await saveLog(jobId, 'info', `📧 SMTP verify: ${email}...`);
+            const [smtpResult, gbResult] = await Promise.all([
+              // SMTP verification
+              email ? verifyEmail(email) : Promise.resolve(null),
+              // Google Books publisher + date
+              (!book.publisher || !book.publishDate)
+                ? axios.get(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title.substring(0,50))}+inauthor:${encodeURIComponent(author)}&maxResults=1`, { timeout: 6000 }).catch(() => null)
+                : Promise.resolve(null)
+            ]);
 
+            // Process SMTP result
+            let emailVerified = false;
+            let emailStatus = null;
+            let emailConfidence = null;
+            if (email && smtpResult) {
+              if (smtpResult.valid && smtpResult.status === 'verified') {
+                emailVerified = true; emailStatus = 'verified'; emailConfidence = 'high';
+                await saveLog(jobId, 'success', `✅ HIGH: SMTP inbox confirmed (${email})`);
+              } else if (smtpResult.valid && smtpResult.status === 'catch_all') {
+                emailVerified = true; emailStatus = 'catch_all'; emailConfidence = 'medium';
+                await saveLog(jobId, 'info', `🟡 MEDIUM: catch-all server (${email})`);
+              } else if (smtpResult.valid) {
+                emailVerified = true; emailStatus = smtpResult.status; emailConfidence = 'medium';
+                await saveLog(jobId, 'info', `🟡 MEDIUM: SMTP inconclusive (${email})`);
+              } else {
+                emailVerified = false; emailStatus = smtpResult.status || 'invalid'; emailConfidence = 'low';
+                await saveLog(jobId, 'warning', `❌ SMTP rejected (${email})`);
+              }
+            }
 
-            // Hard skip if this email already exists ANYWHERE in DB — no point saving or contacting again
+            // Process Google Books result
+            if (gbResult?.data?.items?.[0]?.volumeInfo) {
+              const v = gbResult.data.items[0].volumeInfo;
+              if (!book.publisher && v.publisher) { book.publisher = v.publisher.substring(0,60); await saveLog(jobId, 'info', `🏢 ${book.publisher}`); }
+              if (!book.publishDate && v.publishedDate) { book.publishDate = v.publishedDate; await saveLog(jobId, 'info', `📅 ${book.publishDate}`); }
+            }
+
+            // Hard skip if this email already exists ANYWHERE in DB
             if (email && emailVerified) {
               const emailExists = await db.prepare('SELECT id FROM amazon_leads WHERE email = ?').get(email);
               if (emailExists) {
                 await saveLog(jobId, 'info', `⏭️ SKIP (email already collected): ${email}`);
                 return;
-              }
-            }
-
-            // Fetch publisher + date from Google Books API (FREE, no key needed)
-            // Much cheaper than Browser API — no Bright Data cost at all
-            if (!book.publisher || !book.publishDate) {
-              try {
-                const gbUrl = `https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title.substring(0,50))}+inauthor:${encodeURIComponent(author)}&maxResults=1`;
-                const gbRes = await axios.get(gbUrl, { timeout: 8000 });
-                const volInfo = gbRes.data.items?.[0]?.volumeInfo;
-                if (volInfo) {
-                  if (!book.publisher && volInfo.publisher) {
-                    book.publisher = volInfo.publisher.substring(0, 60);
-                    await saveLog(jobId, 'info', `🏢 Publisher: ${book.publisher}`);
-                  }
-                  if (!book.publishDate && volInfo.publishedDate) {
-                    book.publishDate = volInfo.publishedDate;
-                    await saveLog(jobId, 'info', `📅 Date: ${book.publishDate}`);
-                  }
-                }
-              } catch(e) {
-                // Google Books unavailable — not critical, continue without
               }
             }
 
