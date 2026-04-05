@@ -736,14 +736,8 @@ function isLikelyAuthorEmail(email, authorName) {
   const localHasName = nameParts.some(part => fuzzyContains(local, part));
   if (localHasName) return true;
 
-  // Trust emails where:
-  // 1. Domain contains author's name → hello@davidmcclaskey.com ✅
-  // 2. Local part contains author's name → david@anysite.com ✅
-  // Note: we already validated the WEBSITE belongs to this author (via DDG name match)
-  // so any non-generic email found on that website is theirs
-  const GENERIC_DOMAINS = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','me.com','mac.com','aol.com','protonmail.com','live.com','msn.com'];
-  if (!GENERIC_DOMAINS.includes(domain)) return true; // custom domain = their site = their email
-
+  // Only accept emails where author's name appears in domain OR local part
+  // Rejects generic emails like info@, contact@, hello@ that could belong to anyone
   return false;
 }
 
@@ -1654,22 +1648,16 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               const isGenericDomain = GENERIC_DOMAINS.includes(emailDomain);
               const localHasAuthorName = authorNameParts.some(part => emailLocal.includes(part));
 
-              if (emailOnAuthorDomain) {
-                // e.g. alain@alainsamson.com — on their own domain → HIGH
-                emailVerified = true; emailStatus = 'author_domain'; emailConfidence = 'high';
-                await saveLog(jobId, 'success', `✅ HIGH (author domain): ${email}`);
-              } else if (!isGenericDomain) {
-                // Custom domain email not matching author name — still likely theirs
-                emailVerified = true; emailStatus = 'author_domain'; emailConfidence = 'high';
-                await saveLog(jobId, 'success', `✅ HIGH (custom domain): ${email}`);
-              } else if (isGenericDomain && localHasAuthorName) {
-                // Gmail/Yahoo with author name — medium, try to confirm on website
-                emailVerified = true; emailStatus = 'name_match'; emailConfidence = 'medium';
-                await saveLog(jobId, 'info', `🟡 MEDIUM (name match): ${email}`);
+              if (emailOnAuthorDomain || localHasAuthorName) {
+                // Author's name in domain OR local part → definitely theirs
+                // e.g. alain@alainsamson.com OR alainsamson@gmail.com
+                const status = isGenericDomain ? 'name_match' : 'author_domain';
+                emailVerified = true; emailStatus = status; emailConfidence = 'high';
+                await saveLog(jobId, 'success', `✅ HIGH (${status}): ${email}`);
               } else {
-                // Generic email, no name match — low quality, skip
+                // No name match — could be anyone's email, skip
                 emailVerified = false; emailStatus = 'unverified'; emailConfidence = 'low';
-                await saveLog(jobId, 'warning', `❌ SKIP (unverified generic): ${email}`);
+                await saveLog(jobId, 'warning', `❌ SKIP (no name match): ${email}`);
               }
             }
 
