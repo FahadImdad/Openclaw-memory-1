@@ -84,7 +84,7 @@ async function scrapeWithBrightData(url, jobId = null) {
 }
 
 // Semaphore to limit concurrent browser sessions (Bright Data has limited slots)
-const BROWSER_CONCURRENCY = 5;
+const BROWSER_CONCURRENCY = 20;
 let browserActive = 0;
 const browserQueue = [];
 function browserAcquire() {
@@ -114,8 +114,6 @@ async function scrapeWithBrowser(url, waitSelector = null) {
 
     if (waitSelector) {
       await page.waitForSelector(waitSelector, { timeout: 10000 }).catch(() => {});
-    } else {
-      await new Promise(r => setTimeout(r, 2000));
     }
 
     const html = await page.content();
