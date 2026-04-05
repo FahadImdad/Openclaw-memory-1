@@ -171,40 +171,56 @@ Return this exact JSON format:
 }
 
 // Verify email via free SMTP check (no API key needed)
-// Connects to the mail server and checks if the inbox exists
+// Also detects catch-all servers to avoid false positives
 async function verifyEmail(email) {
   if (!email) return { valid: false };
   const net = require('net');
   const dns = require('dns').promises;
   const domain = email.split('@')[1];
-  try {
-    const mx = await dns.resolveMx(domain);
-    if (!mx || mx.length === 0) return { valid: false, status: 'no_mx' };
-    mx.sort((a, b) => a.priority - b.priority);
-    const mxHost = mx[0].exchange;
 
-    return new Promise((resolve) => {
-      const socket = net.createConnection(25, mxHost);
-      let step = 0;
-      socket.setTimeout(6000);
-      socket.on('timeout', () => { socket.destroy(); resolve({ valid: false, status: 'timeout' }); });
-      socket.on('error', () => resolve({ valid: true, status: 'accept_all' })); // can't connect = greylisting = treat as valid
-      socket.on('data', (data) => {
-        const r = data.toString();
-        if (step === 0 && r.startsWith('220')) { socket.write('HELO verify.check\r\n'); step = 1; }
-        else if (step === 1 && r.startsWith('250')) { socket.write('MAIL FROM:<verify@verify.check>\r\n'); step = 2; }
-        else if (step === 2 && r.startsWith('250')) { socket.write(`RCPT TO:<${email}>\r\n`); step = 3; }
-        else if (step === 3) {
-          socket.write('QUIT\r\n');
-          socket.destroy();
-          const valid = r.startsWith('250') || r.startsWith('251') || r.startsWith('252');
-          resolve({ valid, status: valid ? 'valid' : 'invalid' });
-        }
+  async function smtpCheck(testEmail) {
+    try {
+      const mx = await dns.resolveMx(domain);
+      if (!mx || mx.length === 0) return { valid: false, status: 'no_mx' };
+      mx.sort((a, b) => a.priority - b.priority);
+      const mxHost = mx[0].exchange;
+      return new Promise((resolve) => {
+        const socket = net.createConnection(25, mxHost);
+        let step = 0;
+        socket.setTimeout(6000);
+        socket.on('timeout', () => { socket.destroy(); resolve({ valid: null, status: 'timeout' }); });
+        socket.on('error', () => resolve({ valid: null, status: 'connect_failed' }));
+        socket.on('data', (data) => {
+          const r = data.toString();
+          if (step === 0 && r.startsWith('220')) { socket.write('HELO verify.check\r\n'); step = 1; }
+          else if (step === 1 && r.startsWith('250')) { socket.write('MAIL FROM:<verify@verify.check>\r\n'); step = 2; }
+          else if (step === 2 && r.startsWith('250')) { socket.write(`RCPT TO:<${testEmail}>\r\n`); step = 3; }
+          else if (step === 3) {
+            socket.write('QUIT\r\n');
+            socket.destroy();
+            const accepted = r.startsWith('250') || r.startsWith('251') || r.startsWith('252');
+            resolve({ valid: accepted, status: accepted ? 'valid' : 'invalid' });
+          }
+        });
       });
-    });
-  } catch (e) {
-    return { valid: false, status: 'error' };
+    } catch(e) { return { valid: null, status: 'error' }; }
   }
+
+  // Step 1: Check the actual email
+  const realResult = await smtpCheck(email);
+  if (!realResult.valid) return { valid: false, status: realResult.status };
+  if (realResult.valid === null) return { valid: true, status: 'accept_all' }; // can't connect, assume valid
+
+  // Step 2: Catch-all detection — test a random fake email on same domain
+  const fakeEmail = `xyznonexistent_${Date.now()}@${domain}`;
+  const fakeResult = await smtpCheck(fakeEmail);
+  if (fakeResult.valid === true) {
+    // Server accepts everything — catch-all, save as medium confidence
+    return { valid: true, status: 'catch_all' };
+  }
+
+  // Real email accepted, fake rejected = inbox confirmed ✅
+  return { valid: true, status: 'verified' };
 }
 
 // Hunter.io domain search — find emails for a given domain
@@ -1581,16 +1597,26 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             if (email) {
               await saveLog(jobId, 'info', `📧 SMTP verify: ${email}...`);
               const smtpResult = await verifyEmail(email);
-              if (smtpResult.valid) {
+              if (smtpResult.valid && smtpResult.status === 'verified') {
                 emailVerified = true;
-                emailStatus = smtpResult.status || 'smtp_valid';
+                emailStatus = 'verified';
                 emailConfidence = 'high';
-                await saveLog(jobId, 'success', `✅ HIGH: SMTP verified (${email})`);
+                await saveLog(jobId, 'success', `✅ HIGH: SMTP verified inbox confirmed (${email})`);
+              } else if (smtpResult.valid && smtpResult.status === 'catch_all') {
+                emailVerified = true;
+                emailStatus = 'catch_all';
+                emailConfidence = 'medium';
+                await saveLog(jobId, 'info', `🟡 MEDIUM: catch-all server, inbox unconfirmed (${email})`);
+              } else if (smtpResult.valid) {
+                emailVerified = true;
+                emailStatus = smtpResult.status;
+                emailConfidence = 'medium';
+                await saveLog(jobId, 'info', `🟡 MEDIUM: SMTP inconclusive (${email})`);
               } else {
                 emailVerified = false;
                 emailStatus = smtpResult.status || 'invalid';
                 emailConfidence = 'low';
-                await saveLog(jobId, 'warning', `❌ INVALID: SMTP rejected (${email})`);
+                await saveLog(jobId, 'warning', `❌ SKIP: SMTP rejected (${email})`);
               }
             }
 
