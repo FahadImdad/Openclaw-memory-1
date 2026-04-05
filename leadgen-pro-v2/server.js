@@ -170,66 +170,34 @@ Return this exact JSON format:
   }
 }
 
-// MX record cache — avoid duplicate DNS lookups for same domain
+// MX record cache
 const mxCache = new Map();
 
-// Verify email via free SMTP check (no API key needed)
-// Also detects catch-all servers to avoid false positives
+// Verify email — MX check + trust custom domain emails found on author's own website
 async function verifyEmail(email) {
   if (!email) return { valid: false };
-  const net = require('net');
   const dns = require('dns').promises;
   const domain = email.split('@')[1];
+  const GENERIC_DOMAINS = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','me.com','mac.com','aol.com','protonmail.com','live.com','msn.com'];
 
-  async function smtpCheck(testEmail) {
-    try {
-      let mx = mxCache.get(domain);
-      if (!mx) {
-        mx = await dns.resolveMx(domain);
-        if (mx && mx.length > 0) mxCache.set(domain, mx);
-      }
-      if (!mx || mx.length === 0) return { valid: false, status: 'no_mx' };
-      mx.sort((a, b) => a.priority - b.priority);
-      const mxHost = mx[0].exchange;
-      return new Promise((resolve) => {
-        const socket = net.createConnection(25, mxHost);
-        let step = 0;
-        socket.setTimeout(6000);
-        socket.on('timeout', () => { try { socket.destroy(); } catch(e) {} resolve({ valid: null, status: 'timeout' }); });
-        socket.on('error', (err) => { try { socket.destroy(); } catch(e) {} resolve({ valid: null, status: 'connect_failed' }); });
-        socket.on('data', (data) => {
-          const r = data.toString();
-          if (step === 0 && r.startsWith('220')) { socket.write('HELO verify.check\r\n'); step = 1; }
-          else if (step === 1 && r.startsWith('250')) { socket.write('MAIL FROM:<verify@verify.check>\r\n'); step = 2; }
-          else if (step === 2 && r.startsWith('250')) { socket.write(`RCPT TO:<${testEmail}>\r\n`); step = 3; }
-          else if (step === 3) {
-            socket.write('QUIT\r\n');
-            socket.destroy();
-            const accepted = r.startsWith('250') || r.startsWith('251') || r.startsWith('252');
-            resolve({ valid: accepted, status: accepted ? 'valid' : 'invalid' });
-          }
-        });
-      });
-    } catch(e) { return { valid: null, status: 'error' }; }
-  }
-
-  // Fire real + fake check simultaneously (catch-all detection in parallel)
-  const fakeEmail = `xyznonexistent_${Date.now()}@${domain}`;
-  let realResult, fakeResult;
   try {
-    [realResult, fakeResult] = await Promise.all([
-      smtpCheck(email),
-      smtpCheck(fakeEmail)
-    ]);
+    // MX check — confirm domain has a mail server (catches fake/typo domains)
+    let mx = mxCache.get(domain);
+    if (!mx) {
+      mx = await dns.resolveMx(domain).catch(() => null);
+      if (mx && mx.length > 0) mxCache.set(domain, mx);
+    }
+    if (!mx || mx.length === 0) return { valid: false, status: 'no_mx' };
+
+    // Custom domain email found on author's own website = HIGH confidence
+    // (email physically exists on their site = they put it there = it's real)
+    if (!GENERIC_DOMAINS.includes(domain)) return { valid: true, status: 'verified' };
+
+    // Generic domain (Gmail etc) — valid MX but can't confirm inbox
+    return { valid: true, status: 'accept_all' };
   } catch(e) {
-    // Port 25 blocked (common on cloud hosts) — treat as accept_all
     return { valid: true, status: 'accept_all' };
   }
-
-  if (realResult.valid === null) return { valid: true, status: 'accept_all' }; // can't connect = port blocked
-  if (!realResult.valid) return { valid: false, status: realResult.status };
-  if (fakeResult.valid === true) return { valid: true, status: 'catch_all' };
-  return { valid: true, status: 'verified' };
 }
 
 // Hunter.io domain search — find emails for a given domain
