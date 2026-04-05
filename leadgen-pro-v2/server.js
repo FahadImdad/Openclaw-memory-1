@@ -85,6 +85,35 @@ async function scrapeWithBrightData(url, jobId = null) {
 
 // Semaphore to limit concurrent browser sessions (Bright Data has limited slots)
 const BROWSER_CONCURRENCY = 20;
+
+// DDG rate limit protection — max 10 concurrent DDG requests + jitter
+let ddgActive = 0;
+const DDG_MAX = 10;
+const ddgQueue = [];
+function ddgAcquire() {
+  return new Promise(resolve => {
+    if (ddgActive < DDG_MAX) { ddgActive++; resolve(); }
+    else ddgQueue.push(resolve);
+  });
+}
+function ddgRelease() {
+  if (ddgQueue.length > 0) { ddgQueue.shift()(); }
+  else ddgActive--;
+}
+async function ddgSearch(query) {
+  await ddgAcquire();
+  // Random jitter 0-500ms to avoid burst hitting DDG simultaneously
+  await new Promise(r => setTimeout(r, Math.random() * 500));
+  try {
+    return await axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+      timeout: 5000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept-Language': 'en-US,en;q=0.9' },
+      maxRedirects: 2
+    }).catch(() => null);
+  } finally {
+    ddgRelease();
+  }
+}
 let browserActive = 0;
 const browserQueue = [];
 function browserAcquire() {
@@ -1048,26 +1077,7 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
   // Step 4: Scrape website as last resort
   // ══════════════════════════════════════════════════════════════
 
-  // ── STEP 1: Hunter email-finder on likely domains ──
-  if (HUNTER_API_KEY) {
-    const likelyDomains = [`${firstName}${lastName}.com`, `${nameSlug}.com`];
-    for (const domain of likelyDomains) {
-      try {
-        const r = await axios.get(
-          `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
-          { timeout: 6000 }
-        ).catch(() => null);
-        const email = r?.data?.data?.email;
-        const score = r?.data?.data?.score || 0;
-        if (email && score >= 50) {
-          saveLog('success', `📧 Hunter: ${email} (${score}%)`);
-          return { email, website: `https://${domain}` };
-        }
-      } catch(e) {}
-    }
-  }
-
-  // ── STEP 2: Find author website — DDG + domain guessing in PARALLEL ──
+  // ── STEP 1: Find author website — DDG (rate-limited) + domain guessing in PARALLEL ──
   let foundWebsite = null;
 
   const domainCandidates = [
@@ -1077,11 +1087,9 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
   ];
 
   const [ddgResult, ...domainResults] = await Promise.all([
-    axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent('"' + authorName + '" author official website')}`, {
-      timeout: 5000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept-Language': 'en-US,en;q=0.9' },
-      maxRedirects: 2
-    }).catch(() => null),
+    // DDG with semaphore + jitter to avoid rate limiting across 150 workers
+    ddgSearch(`"${authorName}" author official website`),
+    // Domain guesses with 3s timeout (already enforced)
     ...domainCandidates.map(domain =>
       axios.get(`https://${domain}`, {
         timeout: 3000, maxRedirects: 2,
@@ -1109,24 +1117,7 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
 
   saveLog('info', `🌐 ${foundWebsite}`);
 
-  // ── STEP 3: Hunter on found domain ──
-  if (HUNTER_API_KEY) {
-    try {
-      const domain = new URL(foundWebsite).hostname.replace(/^www\./, '');
-      const r = await axios.get(
-        `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
-        { timeout: 8000 }
-      ).catch(() => null);
-      const email = r?.data?.data?.email;
-      const score = r?.data?.data?.score || 0;
-      if (email && score >= 30) {
-        saveLog('success', `📧 Hunter domain: ${email} (${score}%)`);
-        return { email, website: foundWebsite };
-      }
-    } catch(e) {}
-  }
-
-  // ── STEP 4: Scrape homepage + /contact + /about in parallel ──
+  // ── STEP 2: Scrape homepage + /contact + /about FIRST (free) ──
   const base = foundWebsite.replace(/\/$/, '');
 
   const [homeResult, contactResult, aboutResult] = await Promise.all([
@@ -1139,6 +1130,24 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
   if (found) {
     saveLog('success', `📧 Found: ${found}`);
     return { email: found, website: foundWebsite };
+  }
+
+  // ── STEP 3: Hunter LAST RESORT — only after scraping fails (saves credits) ──
+  // Per Hunter docs: "If email can't be found, it's free" — so this costs 0 if no result
+  if (HUNTER_API_KEY) {
+    try {
+      const domain = new URL(foundWebsite).hostname.replace(/^www\./, '');
+      const r = await axios.get(
+        `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
+        { timeout: 8000 }
+      ).catch(() => null);
+      const email = r?.data?.data?.email;
+      const score = r?.data?.data?.score || 0;
+      if (email && score >= 30) {
+        saveLog('success', `📧 Hunter: ${email} (score: ${score}%)`);
+        return { email, website: foundWebsite };
+      }
+    } catch(e) {}
   }
 
   saveLog('info', `⏩ No email found for ${authorName} (website-only)`);
