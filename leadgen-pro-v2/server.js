@@ -195,8 +195,8 @@ async function verifyEmail(email) {
         const socket = net.createConnection(25, mxHost);
         let step = 0;
         socket.setTimeout(6000);
-        socket.on('timeout', () => { socket.destroy(); resolve({ valid: null, status: 'timeout' }); });
-        socket.on('error', () => resolve({ valid: null, status: 'connect_failed' }));
+        socket.on('timeout', () => { try { socket.destroy(); } catch(e) {} resolve({ valid: null, status: 'timeout' }); });
+        socket.on('error', (err) => { try { socket.destroy(); } catch(e) {} resolve({ valid: null, status: 'connect_failed' }); });
         socket.on('data', (data) => {
           const r = data.toString();
           if (step === 0 && r.startsWith('220')) { socket.write('HELO verify.check\r\n'); step = 1; }
@@ -215,12 +215,18 @@ async function verifyEmail(email) {
 
   // Fire real + fake check simultaneously (catch-all detection in parallel)
   const fakeEmail = `xyznonexistent_${Date.now()}@${domain}`;
-  const [realResult, fakeResult] = await Promise.all([
-    smtpCheck(email),
-    smtpCheck(fakeEmail)
-  ]);
+  let realResult, fakeResult;
+  try {
+    [realResult, fakeResult] = await Promise.all([
+      smtpCheck(email),
+      smtpCheck(fakeEmail)
+    ]);
+  } catch(e) {
+    // Port 25 blocked (common on cloud hosts) — treat as accept_all
+    return { valid: true, status: 'accept_all' };
+  }
 
-  if (realResult.valid === null) return { valid: true, status: 'accept_all' }; // can't connect
+  if (realResult.valid === null) return { valid: true, status: 'accept_all' }; // can't connect = port blocked
   if (!realResult.valid) return { valid: false, status: realResult.status };
   if (fakeResult.valid === true) return { valid: true, status: 'catch_all' };
   return { valid: true, status: 'verified' };
