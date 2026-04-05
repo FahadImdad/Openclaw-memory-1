@@ -501,8 +501,8 @@
                 ${statusBadge(job)}
                 <span class="text-xs text-gray-400 ml-1 task-verified-badge">✅ ${job.verified_count}/${job.target_leads}</span>
                 <span class="text-xs text-gray-600">${job.date_from} → ${job.date_to}</span>
-                ${job.started_at ? `<span class="text-xs text-blue-400">🕐 ${new Date(job.started_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>` : ''}
-                ${job.completed_at ? `<span class="text-xs text-green-400">🏁 ${new Date(job.completed_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>` : ''}
+                ${job.started_at ? `<span class="text-xs text-blue-400">🕐 ${new Date(job.started_at).toLocaleDateString([],{month:'short',day:'numeric'})} ${new Date(job.started_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>` : ''}
+                ${job.completed_at ? `<span class="text-xs text-green-400">🏁 ${new Date(job.completed_at).toLocaleDateString([],{month:'short',day:'numeric'})} ${new Date(job.completed_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>` : ''}
                 ${isRunning && job.started_at ? `<span class="text-xs text-yellow-400" id="task-elapsed-${job.id}">⏱ ...</span>` : ''}
               </div>
               ${progressBar(job.verified_count, job.target_leads)}
