@@ -1650,7 +1650,7 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             // Much cheaper than Browser API — no Bright Data cost at all
             if (!book.publisher || !book.publishDate) {
               try {
-                const gbUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${asin}+intitle:${encodeURIComponent(title.substring(0,40))}&maxResults=1`;
+                const gbUrl = `https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title.substring(0,50))}+inauthor:${encodeURIComponent(author)}&maxResults=1`;
                 const gbRes = await axios.get(gbUrl, { timeout: 8000 });
                 const volInfo = gbRes.data.items?.[0]?.volumeInfo;
                 if (volInfo) {
