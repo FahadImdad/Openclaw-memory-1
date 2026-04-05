@@ -22,6 +22,7 @@ const SCHEMA_PG = `
     resume_url_index INTEGER DEFAULT 0,
     resume_page INTEGER DEFAULT 1,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
     completed_at TEXT
   );
   CREATE TABLE IF NOT EXISTS amazon_leads (

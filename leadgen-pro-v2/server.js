@@ -1201,7 +1201,7 @@ app.post('/api/jobs/:jobId/restart', async (req, res) => {
   const running = await db.prepare(`SELECT id FROM scrape_jobs WHERE framework='amazon' AND status='running'`).get();
   if (running) return res.json({ ok: false, error: `Job #${running.id} is already running` });
 
-  await db.prepare(`UPDATE scrape_jobs SET status='running', completed_at=NULL WHERE id=?`).run(jobId);
+  await db.prepare(`UPDATE scrape_jobs SET status='running', completed_at=NULL, started_at=CURRENT_TIMESTAMP WHERE id=?`).run(jobId);
   await saveLog(jobId, 'info', `🔄 Manually restarted by user`);
   setImmediate(() => runAmazonJob(jobId, job.date_from, job.date_to, job.target_leads, job.keyword));
   res.json({ ok: true });
@@ -1447,7 +1447,7 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
           consecutiveEmpty = 0;
 
           // Concurrency pool — keep CONCURRENCY slots busy
-          const CONCURRENCY = 100;
+          const CONCURRENCY = 150;
           await saveLog(jobId, 'info', `⚡ Processing ${pageBooks.length} authors with ${CONCURRENCY} concurrent workers...`);
 
           // Filter out already-seen ASINs (current run in-memory + DB for this job only)
@@ -1758,8 +1758,8 @@ app.post('/api/amazon', async (req, res) => {
 
   // Create scrape job in DB
   const jobResult = await db.prepare(
-    `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status)
-     VALUES ('amazon', ?, ?, ?, ?, 'running')`
+    `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status, started_at)
+     VALUES ('amazon', ?, ?, ?, ?, 'running', CURRENT_TIMESTAMP)`
   ).run(dateFrom, dateTo, keyword || null, targetLeads);
   const jobId = jobResult.lastInsertRowid;
 
@@ -2176,6 +2176,7 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS publisher TEXT");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS bd_calls INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS book_format TEXT DEFAULT 'Paperback'");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS started_at TEXT");
     } else {
       // SQLite doesn't support IF NOT EXISTS on ALTER TABLE — use try/catch per column
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN resume_url_index INTEGER DEFAULT 0");
@@ -2184,6 +2185,7 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN publisher TEXT");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN bd_calls INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN book_format TEXT DEFAULT 'Paperback'");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN started_at TEXT");
     }
 
     // Migrate ASIN unique constraint from global → per-job
