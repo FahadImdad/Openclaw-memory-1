@@ -1427,7 +1427,6 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               cycleStartCount = verifiedCount;
               urlIndex = 0;
               await saveLog(jobId, 'info', `🔄 Completed all ${AMAZON_CATEGORY_NODES.length} categories — found ${newLeadsThisCycle} new leads this cycle. Restarting...`);
-              await new Promise(r => setTimeout(r, 5 * 60 * 1000));
               seenAsinsThisRun.clear();
             } else {
               await saveLog(jobId, 'info', `📂 Moving to next category URL ${urlIndex+1}/${AMAZON_CATEGORY_NODES.length}...`);
@@ -1704,7 +1703,6 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             await saveLog(jobId, 'success', `🎯 Target of ${targetLeads} reached — stopping.`);
           }
 
-          await new Promise(r => setTimeout(r, 500));
         }
       } catch (error) {
         await saveLog(jobId, 'error', `❌ Fatal error: ${error.message}`);
