@@ -1434,10 +1434,10 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             }
           }
 
-          const pageBatch = [page_num, page_num+1, page_num+2, page_num+3, page_num+4, page_num+5, page_num+6, page_num+7, page_num+8, page_num+9].filter(p => p <= maxPages);
+          const pageBatch = Array.from({length: 20}, (_, i) => page_num + i).filter(p => p <= maxPages);
           await saveLog(jobId, 'info', `📄 Category ${urlIndex+1}/${AMAZON_CATEGORY_NODES.length} — pages ${pageBatch.join(',')}...`);
           const batchResults = await Promise.all(pageBatch.map(p => scrapeOnePage(p)));
-          page_num += 10;
+          page_num += 20;
 
           // Save resume position after every batch
           await db.prepare('UPDATE scrape_jobs SET resume_url_index=?, resume_page=? WHERE id=?').run(urlIndex, page_num, jobId);
@@ -1448,7 +1448,7 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
           consecutiveEmpty = 0;
 
           // Concurrency pool — keep CONCURRENCY slots busy
-          const CONCURRENCY = 100;
+          const CONCURRENCY = 300;
           await saveLog(jobId, 'info', `⚡ Processing ${pageBooks.length} authors with ${CONCURRENCY} concurrent workers...`);
 
           // Filter out already-seen ASINs (current run in-memory + DB for this job only)
