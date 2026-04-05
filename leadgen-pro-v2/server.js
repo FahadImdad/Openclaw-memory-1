@@ -724,7 +724,17 @@ function isLikelyAuthorEmail(email, authorName) {
   const localHasName = nameParts.some(part => fuzzyContains(local, part));
   if (localHasName) return true;
 
-  // Don't trust random custom domain emails
+  // Accept ANY email on a custom domain that contains the author's name
+  // e.g. hello@davidmcclaskey.com → domain has "davidmcclaskey" → accept
+  if (domainHasName) return true;
+
+  // Accept if local part has author name
+  if (localHasName) return true;
+
+  // Accept non-generic emails on custom (non-generic) domains — likely theirs
+  const GENERIC_DOMAINS = ['gmail.com','yahoo.com','hotmail.com','outlook.com','icloud.com','me.com','mac.com','aol.com','protonmail.com','live.com','msn.com'];
+  if (!GENERIC_DOMAINS.includes(domain)) return true;
+
   return false;
 }
 
