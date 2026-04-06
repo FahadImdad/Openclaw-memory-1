@@ -1105,24 +1105,8 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
     `author${nameSlug}.com`,
   ];
 
-  if (HUNTER_API_KEY) {
-    // Fire all 3 domain guesses in parallel → 3x faster
-    const hunterGuesses = await Promise.all(
-      domainCandidates.slice(0, 3).map(domain =>
-        axios.get(
-          `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
-          { timeout: 6000 }
-        ).then(r => ({ email: r?.data?.data?.email, score: r?.data?.data?.score || 0, domain })).catch(() => null)
-      )
-    );
-    const bestGuess = hunterGuesses
-      .filter(r => r?.email && r?.score >= 50)
-      .sort((a, b) => b.score - a.score)[0];
-    if (bestGuess) {
-      saveLog('success', `📧 Hunter (guessed domain): ${bestGuess.email} (${bestGuess.score}%)`);
-      return { email: bestGuess.email, website: `https://${bestGuess.domain}` };
-    }
-  }
+  // Skip Hunter on guessed domains — too many false hits, wastes credits + time
+  // Hunter is called later on the CONFIRMED domain (more accurate)
 
   // ── STEP 2: Find author website — DDG + domain guessing ──
   let foundWebsite = null;
@@ -1438,9 +1422,10 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
 
         // Scrape Amazon page — direct HTTP first (FREE), fallback to Bright Data only if blocked
         const AMAZON_HEADERS = [
-          { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36', 'Accept-Language': 'en-US,en;q=0.9', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
-          { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36', 'Accept-Language': 'en-US,en;q=0.9' },
-          { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+          { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', 'Accept-Language': 'en-US,en;q=0.9', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8', 'Accept-Encoding': 'gzip, deflate, br', 'Cache-Control': 'no-cache', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'none' },
+          { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36', 'Accept-Language': 'en-US,en;q=0.9', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Encoding': 'gzip, deflate, br', 'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate' },
+          { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0', 'Accept-Language': 'en-US,en;q=0.5', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8', 'Accept-Encoding': 'gzip, deflate, br', 'Cache-Control': 'no-cache' },
+          { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36', 'Accept-Language': 'en-US,en;q=0.9', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Encoding': 'gzip, deflate, br' },
         ];
         let headerIdx = 0;
 
