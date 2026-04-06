@@ -444,13 +444,13 @@
       }
 
       // Only re-render cards whose status changed — avoid resetting lead counts on every poll
-      // Sort: oldest first so afterbegin stacks newest on top
+      // Sort: newest first, append to bottom = newest always at bottom
       const sortedJobs = [...filtered].sort((a, b) => a.id - b.id);
       sortedJobs.forEach(job => {
         const existing = document.getElementById(`task-card-${job.id}`);
         if (!existing) {
-          // New card — insert at TOP (newest always on top)
-          container.insertAdjacentHTML('afterbegin', renderJobCard(job, framework));
+          // New card — append to bottom (newest at bottom)
+          container.insertAdjacentHTML('beforeend', renderJobCard(job, framework));
           const expanded = _minimized[job.id] === true || (job.status === 'running');
           if (expanded) loadTaskCardContent(job.id, job.framework, framework);
         } else {
