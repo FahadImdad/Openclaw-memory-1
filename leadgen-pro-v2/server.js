@@ -1615,21 +1615,43 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             }
 
             // Date range filter — only process books published within the user's selected range
-            if (book.publishDate) {
-              const pubDate = new Date(book.publishDate);
+            // If no publish date found from Amazon listing, check Google Books for accurate date
+            let resolvedDate = book.publishDate;
+            if (!resolvedDate) {
+              // Try Google Books to get the date before filtering
+              try {
+                const gbCheck = await axios.get(
+                  `https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(title.substring(0,50))}+inauthor:${encodeURIComponent(author)}&maxResults=1`,
+                  { timeout: 5000 }
+                ).catch(() => null);
+                const volInfo = gbCheck?.data?.items?.[0]?.volumeInfo;
+                if (volInfo?.publishedDate) {
+                  resolvedDate = volInfo.publishedDate;
+                  book.publishDate = resolvedDate;
+                  if (volInfo.publisher) book.publisher = volInfo.publisher.substring(0, 60);
+                }
+              } catch(e) {}
+            }
+
+            if (resolvedDate) {
+              const pubDate = new Date(resolvedDate);
               const fromDate = new Date(dateFrom);
               const toDate = new Date(dateTo);
-              toDate.setHours(23, 59, 59, 999); // inclusive end
+              toDate.setHours(23, 59, 59, 999);
               if (!isNaN(pubDate.getTime())) {
                 if (pubDate < fromDate) {
-                  await saveLog(jobId, 'info', `⏭️ SKIP (published ${book.publishDate} — before range): ${title.substring(0, 50)}`);
+                  await saveLog(jobId, 'info', `⏭️ SKIP (published ${resolvedDate} — before range): ${title.substring(0, 50)}`);
                   return;
                 }
                 if (pubDate > toDate) {
-                  await saveLog(jobId, 'info', `⏭️ SKIP (published ${book.publishDate} — after range / pre-order): ${title.substring(0, 50)}`);
+                  await saveLog(jobId, 'info', `⏭️ SKIP (published ${resolvedDate} — after range / pre-order): ${title.substring(0, 50)}`);
                   return;
                 }
               }
+            } else {
+              // No date found anywhere — skip to avoid wrong-date leads
+              await saveLog(jobId, 'info', `⏭️ SKIP (no publish date found): ${title.substring(0, 50)}`);
+              return;
             }
 
             // ASIN dedup — skip if already in DB for this job
