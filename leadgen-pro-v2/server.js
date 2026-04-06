@@ -1106,19 +1106,21 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
   ];
 
   if (HUNTER_API_KEY) {
-    for (const domain of domainCandidates.slice(0, 3)) { // try top 3 guesses
-      try {
-        const r = await axios.get(
+    // Fire all 3 domain guesses in parallel → 3x faster
+    const hunterGuesses = await Promise.all(
+      domainCandidates.slice(0, 3).map(domain =>
+        axios.get(
           `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
           { timeout: 6000 }
-        ).catch(() => null);
-        const email = r?.data?.data?.email;
-        const score = r?.data?.data?.score || 0;
-        if (email && score >= 50) {
-          saveLog('success', `📧 Hunter (guessed domain): ${email} (${score}%)`);
-          return { email, website: `https://${domain}` };
-        }
-      } catch(e) {}
+        ).then(r => ({ email: r?.data?.data?.email, score: r?.data?.data?.score || 0, domain })).catch(() => null)
+      )
+    );
+    const bestGuess = hunterGuesses
+      .filter(r => r?.email && r?.score >= 50)
+      .sort((a, b) => b.score - a.score)[0];
+    if (bestGuess) {
+      saveLog('success', `📧 Hunter (guessed domain): ${bestGuess.email} (${bestGuess.score}%)`);
+      return { email: bestGuess.email, website: `https://${bestGuess.domain}` };
     }
   }
 
@@ -1158,30 +1160,25 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
 
   saveLog('info', `🌐 ${foundWebsite}`);
 
-  // ── STEP 3: Hunter on found domain ──
-  if (HUNTER_API_KEY) {
-    try {
-      const domain = new URL(foundWebsite).hostname.replace(/^www\./, '');
-      const r = await axios.get(
-        `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(domain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
-        { timeout: 8000 }
-      ).catch(() => null);
-      const email = r?.data?.data?.email;
-      const score = r?.data?.data?.score || 0;
-      if (email && score >= 30) {
-        saveLog('success', `📧 Hunter (found domain): ${email} (${score}%)`);
-        return { email, website: foundWebsite };
-      }
-    } catch(e) {}
-  }
-
-  // ── STEP 4: Scrape homepage + /contact + /about ──
+  // ── STEP 3+4: Hunter on found domain + website scrape IN PARALLEL ──
   const base = foundWebsite.replace(/\/$/, '');
-  const [homeResult, contactResult, aboutResult] = await Promise.all([
+  const foundDomain = new URL(foundWebsite).hostname.replace(/^www\./, '');
+
+  const [hunterResult, homeResult, contactResult, aboutResult] = await Promise.all([
+    HUNTER_API_KEY ? axios.get(
+      `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(foundDomain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
+      { timeout: 8000 }
+    ).then(r => ({ email: r?.data?.data?.email, score: r?.data?.data?.score || 0 })).catch(() => null) : Promise.resolve(null),
     fetchEmails(base),
     fetchEmails(`${base}/contact`),
     fetchEmails(`${base}/about`)
   ]);
+
+  // Hunter takes priority (more accurate), then website scraping
+  if (hunterResult?.email && hunterResult?.score >= 30) {
+    saveLog('success', `📧 Hunter: ${hunterResult.email} (${hunterResult.score}%)`);
+    return { email: hunterResult.email, website: foundWebsite };
+  }
 
   const found = homeResult.email || contactResult.email || aboutResult.email;
   if (found) {
