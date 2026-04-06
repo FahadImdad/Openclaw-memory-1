@@ -1168,8 +1168,13 @@ async function findAuthorContact(authorName, bookTitle, saveLog, jobId = null) {
         `https://api.hunter.io/v2/email-finder?domain=${encodeURIComponent(foundDomain)}&first_name=${encodeURIComponent(firstName)}&last_name=${encodeURIComponent(lastName)}&api_key=${HUNTER_API_KEY}`,
         { timeout: 8000 }
       ).catch(() => null);
+      // Track Hunter call — only counts credit if email found (per Hunter docs)
       const hunterEmail = r?.data?.data?.email;
       const score = r?.data?.data?.score || 0;
+      if (hunterEmail && jobId) {
+        // Credit used — email was found
+        db.prepare('UPDATE scrape_jobs SET hunter_calls = COALESCE(hunter_calls, 0) + 1 WHERE id = ?').run(jobId).catch?.(() => {});
+      }
       if (hunterEmail && score >= 30) {
         saveLog('success', `📧 Hunter: ${hunterEmail} (${score}%)`);
         return { email: hunterEmail, website: foundWebsite };
@@ -2242,6 +2247,7 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS bd_calls INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS book_format TEXT DEFAULT 'Paperback'");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS started_at TEXT");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS hunter_calls INTEGER DEFAULT 0");
     } else {
       // SQLite doesn't support IF NOT EXISTS on ALTER TABLE — use try/catch per column
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN resume_url_index INTEGER DEFAULT 0");
@@ -2251,6 +2257,7 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN bd_calls INTEGER DEFAULT 0");
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN book_format TEXT DEFAULT 'Paperback'");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN started_at TEXT");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN hunter_calls INTEGER DEFAULT 0");
     }
 
     // Migrate ASIN unique constraint from global → per-job

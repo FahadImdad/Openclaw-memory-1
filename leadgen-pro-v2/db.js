@@ -23,7 +23,9 @@ const SCHEMA_PG = `
     resume_page INTEGER DEFAULT 1,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     started_at TEXT,
-    completed_at TEXT
+    completed_at TEXT,
+    bd_calls INTEGER DEFAULT 0,
+    hunter_calls INTEGER DEFAULT 0
   );
   CREATE TABLE IF NOT EXISTS amazon_leads (
     id SERIAL PRIMARY KEY,
@@ -218,7 +220,9 @@ if (DATABASE_URL) {
       resume_page INTEGER DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       started_at TEXT,
-      completed_at TEXT
+      completed_at TEXT,
+      bd_calls INTEGER DEFAULT 0,
+      hunter_calls INTEGER DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS amazon_leads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

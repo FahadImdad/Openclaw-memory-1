@@ -546,6 +546,10 @@
                   <div class="text-gray-400">💰 BD Cost</div>
                   <div id="task-stat-bd-${job.id}" class="font-bold text-orange-400">$${((job.bd_calls||0)*0.0015).toFixed(3)}</div>
                 </div>
+                <div class="bg-gray-700 rounded p-1.5" title="Hunter credits used (1 credit = 1 email found)">
+                  <div class="text-gray-400">🎯 Hunter</div>
+                  <div id="task-stat-hunter-${job.id}" class="font-bold text-purple-400">${job.hunter_calls||0} credits</div>
+                </div>
               </div>
             </div>
             <!-- Export + Search -->
@@ -1642,6 +1646,8 @@
             if (processedEl) processedEl.textContent = job.total_count || 0;
             if (verifiedEl) verifiedEl.textContent = job.verified_count || 0;
             if (bdEl) bdEl.textContent = `$${((job.bd_calls||0)*0.0015).toFixed(3)}`;
+            const hunterEl = document.getElementById(`task-stat-hunter-${job.id}`);
+            if (hunterEl) hunterEl.textContent = `${job.hunter_calls||0} credits`;
             // Also update the header badge ✅ X/Y and progress bar
             const card = document.getElementById(`task-card-${job.id}`);
             if (card) {
