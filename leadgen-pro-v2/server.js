@@ -1501,6 +1501,34 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
           if (pageBooks.length === 0) { consecutiveEmpty++; if(consecutiveEmpty>=3) { page_num = maxPages + 1; } continue; }
           consecutiveEmpty = 0;
 
+          // Early exit optimization: Amazon sorts newest first
+          // If ALL books with dates in this batch are OLDER than dateFrom, skip rest of category
+          function parseYM(dateStr) {
+            if (!dateStr) return null;
+            const s = dateStr.trim();
+            if (/^\d{4}-\d{2}/.test(s)) return s.substring(0, 7);
+            const mdy = s.match(/^(\w+)\s+(\d{1,2}),?\s+(\d{4})$/);
+            if (mdy) {
+              const months = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+              const mon = months[mdy[1].toLowerCase().substring(0,3)];
+              return mon ? `${mdy[3]}-${mon}` : null;
+            }
+            const my = s.match(/^(\w+)\s+(\d{4})$/);
+            if (my) {
+              const months = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+              const mon = months[my[1].toLowerCase().substring(0,3)];
+              return mon ? `${my[2]}-${mon}` : null;
+            }
+            return null;
+          }
+          const fromYM = dateFrom.substring(0, 7);
+          const datedBooks = pageBooks.filter(b => b.publishDate && parseYM(b.publishDate));
+          if (datedBooks.length > 0 && datedBooks.every(b => parseYM(b.publishDate) < fromYM)) {
+            await saveLog(jobId, 'info', `⏭️ All books in batch older than ${dateFrom} — skipping to next category`);
+            page_num = maxPages + 1; // jump to next category
+            continue;
+          }
+
           // Concurrency pool — keep CONCURRENCY slots busy
           const CONCURRENCY = 150;
           await saveLog(jobId, 'info', `⚡ Processing ${pageBooks.length} authors with ${CONCURRENCY} concurrent workers...`);
