@@ -525,7 +525,7 @@
                 <span class="text-xs font-bold text-purple-400">🤖 AI Console</span>
                 <span id="task-status-text-${job.id}" class="text-xs text-gray-400"></span>
               </div>
-              <div id="task-log-${job.id}" class="bg-black rounded p-2 text-xs text-green-400 font-mono overflow-y-auto border border-gray-700" style="max-height:180px;">
+              <div id="task-log-${job.id}" class="bg-black rounded p-2 text-xs text-green-400 font-mono overflow-y-auto border border-gray-700" style="max-height:350px;">
                 <div class="text-gray-600">Loading...</div>
               </div>
               <!-- Stats row -->
@@ -978,7 +978,7 @@
               div.textContent = `[${ts}] ${log.message}`;
               inlineLog.appendChild(div);
               inlineLog.scrollTop = inlineLog.scrollHeight;
-              while (inlineLog.children.length > 150) inlineLog.removeChild(inlineLog.firstChild);
+              while (inlineLog.children.length > 500) inlineLog.removeChild(inlineLog.firstChild);
             }
 
             // Update stats counters from log messages
