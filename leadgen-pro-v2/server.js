@@ -1634,16 +1634,40 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             }
 
             if (resolvedDate) {
-              const pubDate = new Date(resolvedDate);
-              const fromDate = new Date(dateFrom);
-              const toDate = new Date(dateTo);
-              toDate.setHours(23, 59, 59, 999);
-              if (!isNaN(pubDate.getTime())) {
-                if (pubDate < fromDate) {
+              // Parse date safely without timezone shift issues
+              // Normalize to YYYY-MM-DD format first
+              function parseToYMD(dateStr) {
+                if (!dateStr) return null;
+                const s = dateStr.trim();
+                // Already YYYY-MM-DD or YYYY-MM
+                if (/^\d{4}-\d{2}(-\d{2})?$/.test(s)) return s.substring(0, 7); // just YYYY-MM
+                // "Jan 9, 2026" or "January 9, 2026"
+                const mdy = s.match(/^(\w+)\s+(\d{1,2}),?\s+(\d{4})$/);
+                if (mdy) {
+                  const months = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+                  const mon = months[mdy[1].toLowerCase().substring(0,3)];
+                  if (mon) return `${mdy[3]}-${mon}-${mdy[2].padStart(2,'0')}`;
+                }
+                // "Jan 2026" — just month/year
+                const my = s.match(/^(\w+)\s+(\d{4})$/);
+                if (my) {
+                  const months = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+                  const mon = months[my[1].toLowerCase().substring(0,3)];
+                  if (mon) return `${my[2]}-${mon}`;
+                }
+                return null;
+              }
+
+              const pubYM = parseToYMD(resolvedDate);
+              const fromYM = dateFrom.substring(0, 7); // YYYY-MM
+              const toYM = dateTo.substring(0, 7);
+
+              if (pubYM) {
+                if (pubYM < fromYM) {
                   await saveLog(jobId, 'info', `⏭️ SKIP (published ${resolvedDate} — before range): ${title.substring(0, 50)}`);
                   return;
                 }
-                if (pubDate > toDate) {
+                if (pubYM > toYM) {
                   await saveLog(jobId, 'info', `⏭️ SKIP (published ${resolvedDate} — after range / pre-order): ${title.substring(0, 50)}`);
                   return;
                 }
