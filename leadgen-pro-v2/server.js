@@ -830,13 +830,20 @@ const FORMAT_FILTERS = [
   { code: '618073011',  name: 'Kindle' },
 ];
 
-function getAmazonUrl(urlIndex, page, formatFilter = '') {
+function getAmazonUrl(urlIndex, page, formatFilter = '', dateFrom = '', dateTo = '') {
   const cat = AMAZON_CATEGORY_NODES[urlIndex % AMAZON_CATEGORY_NODES.length];
   const pg = Math.max(1, Math.min(page, MAX_PAGES_PER_URL));
-  // No format filter — get all formats, detect from HTML
-  // language=en for English only
   const formatParam = formatFilter ? `%2Cp_n_feature_browse-bin%3A${formatFilter}` : '';
-  return `https://www.amazon.com/s?i=stripbooks&rh=n%3A${cat.id}${formatParam}&page=${pg}&s=date-desc-rank&language=en`;
+  // Add publication date filter if provided — Amazon uses Unix timestamps
+  let dateParam = '';
+  if (dateFrom && dateTo) {
+    try {
+      const fromTs = Math.floor(new Date(dateFrom).getTime() / 1000);
+      const toTs = Math.floor(new Date(dateTo + 'T23:59:59').getTime() / 1000);
+      dateParam = `%2Cp_n_publication_date%3A${fromTs}-${toTs}`;
+    } catch(e) {}
+  }
+  return `https://www.amazon.com/s?i=stripbooks&rh=n%3A${cat.id}${formatParam}${dateParam}&page=${pg}&s=date-desc-rank&language=en`;
 }
 
 // Parse Amazon search results HTML (Web Unlocker) into book objects
@@ -1442,7 +1449,7 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
         let headerIdx = 0;
 
         async function scrapeOnePage(pageNum) {
-          const pgUrl = getAmazonUrl(urlIndex, pageNum);
+          const pgUrl = getAmazonUrl(urlIndex, pageNum, '', dateFrom, dateTo);
           try {
             // Try direct HTTP first (no cost)
             const headers = AMAZON_HEADERS[headerIdx % AMAZON_HEADERS.length];
