@@ -14,6 +14,9 @@
     .scrape-form { display: none; }
     .scrape-form.visible { display: block; }
     .bg-gray-750 { background-color: #1f2937; }
+    .mode-btn { background: #374151; border-color: #4b5563; color: #9ca3af; }
+    .mode-btn:hover { background: #4b5563; color: #e5e7eb; }
+    .mode-btn-active { background: #1d4ed8 !important; border-color: #3b82f6 !important; color: #fff !important; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
   </style>
 </head>
@@ -333,9 +336,36 @@
           <button onclick="hideScrapeForm('amazon')" id="closeFormBtn-amazon" class="text-gray-500 hover:text-gray-300 text-sm hidden">✕ Close</button>
         </div>
 
+        <!-- Scrape Mode Toggle -->
+        <div class="mb-4">
+          <label class="block text-xs text-gray-400 mb-2">Scrape Mode</label>
+          <div class="flex gap-2">
+            <button id="modeBtn-new-releases" onclick="setScrapeMode('new-releases')"
+              class="flex-1 py-2 px-3 rounded text-sm font-medium border transition mode-btn mode-btn-active"
+              title="Scrapes Amazon New Releases pages — works for last 30-45 days only. Very cheap (~$0.05/100 leads).">
+              ⚡ New Releases <span class="text-xs opacity-70">(cheap, recent)</span>
+            </button>
+            <button id="modeBtn-advanced" onclick="setScrapeMode('advanced')"
+              class="flex-1 py-2 px-3 rounded text-sm font-medium border transition mode-btn"
+              title="Scrapes Amazon Advanced Search — works for any date range including historical. Higher BD cost (~$7-10/100 leads).">
+              🗓 Advanced Search <span class="text-xs opacity-70">(historical, costlier)</span>
+            </button>
+          </div>
+          <input type="hidden" id="scrapeMode-amazon" value="new-releases">
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <!-- Date Range — Month/Year pickers for Amazon Advanced Search -->
-          <div>
+          <!-- Date Range — switches between day picker (New Releases) and Month/Year (Advanced) -->
+          <div id="dateRange-new-releases">
+            <label class="block text-xs text-gray-400 mb-1">From</label>
+            <input type="date" id="dateFrom-nr" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+          </div>
+          <div id="dateRangeTo-new-releases">
+            <label class="block text-xs text-gray-400 mb-1">To</label>
+            <input type="date" id="dateTo-nr" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+          </div>
+
+          <div id="dateRange-advanced" class="hidden">
             <label class="block text-xs text-gray-400 mb-1">From (Month &amp; Year)</label>
             <div class="flex gap-2">
               <select id="monthFrom-amazon" class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm focus:border-blue-500 focus:outline-none">
@@ -344,11 +374,10 @@
                 <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
                 <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
               </select>
-              <select id="yearFrom-amazon" class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm focus:border-blue-500 focus:outline-none">
-              </select>
+              <select id="yearFrom-amazon" class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm focus:border-blue-500 focus:outline-none"></select>
             </div>
           </div>
-          <div>
+          <div id="dateRangeTo-advanced" class="hidden">
             <label class="block text-xs text-gray-400 mb-1">To (Month &amp; Year)</label>
             <div class="flex gap-2">
               <select id="monthTo-amazon" class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm focus:border-blue-500 focus:outline-none">
@@ -357,11 +386,11 @@
                 <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
                 <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
               </select>
-              <select id="yearTo-amazon" class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm focus:border-blue-500 focus:outline-none">
-              </select>
+              <select id="yearTo-amazon" class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm focus:border-blue-500 focus:outline-none"></select>
             </div>
           </div>
-          <!-- Hidden date inputs for compatibility -->
+
+          <!-- Hidden date inputs used by startAmazonSearch -->
           <input type="hidden" id="dateFrom-amazon">
           <input type="hidden" id="dateTo-amazon">
         </div>
@@ -936,6 +965,20 @@
       document.getElementById(`scrapeForm-${framework}`).classList.remove('visible');
     }
 
+    // ===================== SCRAPE MODE =====================
+    function setScrapeMode(mode) {
+      document.getElementById('scrapeMode-amazon').value = mode;
+      // Toggle button styles
+      document.getElementById('modeBtn-new-releases').classList.toggle('mode-btn-active', mode === 'new-releases');
+      document.getElementById('modeBtn-advanced').classList.toggle('mode-btn-active', mode === 'advanced');
+      // Toggle date pickers
+      const nrEls = ['dateRange-new-releases', 'dateRangeTo-new-releases'];
+      const advEls = ['dateRange-advanced', 'dateRangeTo-advanced'];
+      nrEls.forEach(id => document.getElementById(id)?.classList.toggle('hidden', mode !== 'new-releases'));
+      advEls.forEach(id => document.getElementById(id)?.classList.toggle('hidden', mode !== 'advanced'));
+      syncAmazonHiddenDates();
+    }
+
     // ===================== DATE DEFAULTS =====================
     function setDefaultDates() {
       const today = new Date();
@@ -948,13 +991,18 @@
       if (fromEl) fromEl.value = weekAgo;
       if (toEl) toEl.value = todayStr;
 
-      // Amazon: month/year dropdowns
+      // New Releases: regular date pickers
+      const nrFrom = document.getElementById('dateFrom-nr');
+      const nrTo = document.getElementById('dateTo-nr');
+      if (nrFrom) nrFrom.value = weekAgo;
+      if (nrTo) nrTo.value = todayStr;
+
+      // Advanced Search: month/year dropdowns
       populateAmazonYears();
       const currentYear = today.getFullYear();
-      const currentMonth = today.getMonth() + 1; // 1-based
+      const currentMonth = today.getMonth() + 1;
       const fromMonth = currentMonth === 1 ? 12 : currentMonth - 1;
       const fromYear = currentMonth === 1 ? currentYear - 1 : currentYear;
-
       const mFrom = document.getElementById('monthFrom-amazon');
       const yFrom = document.getElementById('yearFrom-amazon');
       const mTo = document.getElementById('monthTo-amazon');
@@ -981,16 +1029,25 @@
     }
 
     function syncAmazonHiddenDates() {
-      const mFrom = parseInt(document.getElementById('monthFrom-amazon')?.value || 1);
-      const yFrom = parseInt(document.getElementById('yearFrom-amazon')?.value || new Date().getFullYear());
-      const mTo   = parseInt(document.getElementById('monthTo-amazon')?.value || 1);
-      const yTo   = parseInt(document.getElementById('yearTo-amazon')?.value || new Date().getFullYear());
-
+      const mode = document.getElementById('scrapeMode-amazon')?.value || 'new-releases';
       const pad = n => String(n).padStart(2, '0');
       const daysInMonth = (m, y) => new Date(y, m, 0).getDate();
 
-      document.getElementById('dateFrom-amazon').value = `${yFrom}-${pad(mFrom)}-01`;
-      document.getElementById('dateTo-amazon').value   = `${yTo}-${pad(mTo)}-${daysInMonth(mTo, yTo)}`;
+      if (mode === 'new-releases') {
+        // Use day-level date pickers directly
+        const from = document.getElementById('dateFrom-nr')?.value || '';
+        const to   = document.getElementById('dateTo-nr')?.value || '';
+        document.getElementById('dateFrom-amazon').value = from;
+        document.getElementById('dateTo-amazon').value   = to;
+      } else {
+        // Use month/year dropdowns → convert to YYYY-MM-DD
+        const mFrom = parseInt(document.getElementById('monthFrom-amazon')?.value || 1);
+        const yFrom = parseInt(document.getElementById('yearFrom-amazon')?.value || new Date().getFullYear());
+        const mTo   = parseInt(document.getElementById('monthTo-amazon')?.value || 1);
+        const yTo   = parseInt(document.getElementById('yearTo-amazon')?.value || new Date().getFullYear());
+        document.getElementById('dateFrom-amazon').value = `${yFrom}-${pad(mFrom)}-01`;
+        document.getElementById('dateTo-amazon').value   = `${yTo}-${pad(mTo)}-${daysInMonth(mTo, yTo)}`;
+      }
     }
 
     // ===================== POLLING INFRASTRUCTURE =====================
@@ -1553,8 +1610,10 @@
     }
 
     async function startAmazonSearch() {
+      syncAmazonHiddenDates();
       const dateFrom = document.getElementById('dateFrom-amazon').value;
       const dateTo = document.getElementById('dateTo-amazon').value;
+      const scrapeMode = document.getElementById('scrapeMode-amazon').value;
       currentAmazonTarget = parseInt(document.getElementById('targetLeads-amazon').value);
 
       if (!dateFrom || !dateTo) {
@@ -1569,7 +1628,7 @@
         const res = await fetch('/api/amazon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dateFrom, dateTo, targetLeads: currentAmazonTarget })
+          body: JSON.stringify({ dateFrom, dateTo, targetLeads: currentAmazonTarget, scrapeMode })
         });
         if (!res.ok) throw new Error(`Server error ${res.status}`);
         const data = await res.json();
@@ -1669,8 +1728,8 @@
     document.addEventListener('DOMContentLoaded', () => {
       wakeServer();
       setDefaultDates();
-      // Sync hidden date inputs when month/year dropdowns change
-      ['monthFrom-amazon','yearFrom-amazon','monthTo-amazon','yearTo-amazon'].forEach(id => {
+      // Sync hidden date inputs when any date input changes
+      ['monthFrom-amazon','yearFrom-amazon','monthTo-amazon','yearTo-amazon','dateFrom-nr','dateTo-nr'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', syncAmazonHiddenDates);
       });

@@ -1283,7 +1283,7 @@ app.post('/api/jobs/:jobId/restart', async (req, res) => {
 
   await db.prepare(`UPDATE scrape_jobs SET status='running', completed_at=NULL, started_at=CURRENT_TIMESTAMP WHERE id=?`).run(jobId);
   await saveLog(jobId, 'info', `🔄 Manually restarted by user`);
-  setImmediate(() => runAmazonJob(jobId, job.date_from, job.date_to, job.target_leads, job.keyword));
+  setImmediate(() => runAmazonJob(jobId, job.date_from, job.date_to, job.target_leads, job.keyword, job.scrape_mode || 'advanced'));
   res.json({ ok: true });
 });
 
@@ -1421,7 +1421,7 @@ app.get('/api/debug/craigslist', async (req, res) => {
 // ============================================================
 // CORE AMAZON SCRAPE RUNNER — called by POST and auto-resume
 // ============================================================
-async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
+async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword, scrapeMode = 'advanced') {
     // Local sendEvent writes logs to DB instead of SSE
     const sendEvent = async (type, data) => {
       if (type === 'log') {
@@ -1456,7 +1456,12 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
       const monthNames = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const fromMonth = parseInt((dateFrom||'').split('-')[1]||1), fromYear = parseInt((dateFrom||'').split('-')[0]||2026);
       const toMonth   = parseInt((dateTo||'').split('-')[1]||1),   toYear   = parseInt((dateTo||'').split('-')[0]||2026);
-      await saveLog(jobId, 'info', `📚 Amazon Advanced Search: ${monthNames[fromMonth]} ${fromYear} → ${monthNames[toMonth]} ${toYear} | Formats: Paperback, Hardcover, Kindle`);
+      const isNewReleases = scrapeMode === 'new-releases';
+      if (isNewReleases) {
+        await saveLog(jobId, 'info', `📚 Amazon New Releases: ${dateFrom} → ${dateTo} | 38 categories (cheap mode)`);
+      } else {
+        await saveLog(jobId, 'info', `📚 Amazon Advanced Search: ${monthNames[fromMonth]} ${fromYear} → ${monthNames[toMonth]} ${toYear} | Formats: Paperback, Hardcover, Kindle`);
+      }
 
       try {
         await saveLog(jobId, 'info', `🚀 Amazon scraper using Web Unlocker (no browser needed)...`);
@@ -1470,28 +1475,39 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
         ];
         let headerIdx = 0;
 
-        // Build list of (month, year, urlIndex) combinations to iterate
-        // Each month expands into: 38 categories × 3 formats = 114 slots per month
-        // urlIndex encodes both category and format: catIdx = floor(i/3), fmtIdx = i%3
+        // Build list of slots to iterate
+        // New Releases mode: 38 categories (no month loop, direct category pages)
+        // Advanced Search mode: months × 38 categories × 3 formats
         function buildMonthList(from, to) {
           const list = [];
-          let y = parseInt(from.split('-')[0]), m = parseInt(from.split('-')[1]);
-          const toY = parseInt(to.split('-')[0]), toM = parseInt(to.split('-')[1]);
-          const slotsPerMonth = AMAZON_CATEGORY_NODES.length * ADV_FORMAT_CODES.length; // 38 × 3 = 114
-          while (y < toY || (y === toY && m <= toM)) {
-            for (let i = 0; i < slotsPerMonth; i++) {
-              const catIndex = Math.floor(i / ADV_FORMAT_CODES.length);
-              const fmtIndex = i % ADV_FORMAT_CODES.length;
-              list.push({ year: y, month: m, catIndex, formatIndex: fmtIndex, slotUrlIndex: i });
+          if (isNewReleases) {
+            // New Releases: single pass through all 38 category nodes, no format split
+            for (let i = 0; i < AMAZON_CATEGORY_NODES.length; i++) {
+              list.push({ year: null, month: null, catIndex: i, formatIndex: 0, slotUrlIndex: i, isNewReleases: true });
             }
-            m++; if (m > 12) { m = 1; y++; }
+          } else {
+            let y = parseInt(from.split('-')[0]), m = parseInt(from.split('-')[1]);
+            const toY = parseInt(to.split('-')[0]), toM = parseInt(to.split('-')[1]);
+            const slotsPerMonth = AMAZON_CATEGORY_NODES.length * ADV_FORMAT_CODES.length; // 38 × 3 = 114
+            while (y < toY || (y === toY && m <= toM)) {
+              for (let i = 0; i < slotsPerMonth; i++) {
+                const catIndex = Math.floor(i / ADV_FORMAT_CODES.length);
+                const fmtIndex = i % ADV_FORMAT_CODES.length;
+                list.push({ year: y, month: m, catIndex, formatIndex: fmtIndex, slotUrlIndex: i, isNewReleases: false });
+              }
+              m++; if (m > 12) { m = 1; y++; }
+            }
           }
           return list;
         }
         const monthList = buildMonthList(dateFrom, dateTo);
         const totalSlots = monthList.length;
-        const numMonths = Math.ceil(totalSlots / (AMAZON_CATEGORY_NODES.length * ADV_FORMAT_CODES.length));
-        await saveLog(jobId, 'info', `📅 Total search slots: ${totalSlots} (${numMonths} months × ${AMAZON_CATEGORY_NODES.length} categories × ${ADV_FORMAT_CODES.length} formats)`);
+        if (isNewReleases) {
+          await saveLog(jobId, 'info', `📅 Total search slots: ${totalSlots} categories (New Releases mode — very cheap)`);
+        } else {
+          const numMonths = Math.ceil(totalSlots / (AMAZON_CATEGORY_NODES.length * ADV_FORMAT_CODES.length));
+          await saveLog(jobId, 'info', `📅 Total search slots: ${totalSlots} (${numMonths} months × ${AMAZON_CATEGORY_NODES.length} categories × ${ADV_FORMAT_CODES.length} formats)`);
+        }
 
         while (keepGoing) {
           // When we reach the end of Amazon pages for current slot, move to next slot
@@ -1513,28 +1529,38 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               seenAsinsThisRun.clear();
             } else {
               const slot = monthList[urlIndex];
-              const fmtName = ['Paperback','Hardcover','Kindle'][slot.formatIndex];
               const catName = AMAZON_CATEGORY_NODES[slot.catIndex]?.name || `Cat${slot.catIndex}`;
-              const mName = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][slot.month];
-              await saveLog(jobId, 'info', `📂 Moving to slot ${urlIndex+1}/${totalSlots}: ${mName} ${slot.year} — ${catName} / ${fmtName}`);
+              if (slot.isNewReleases) {
+                await saveLog(jobId, 'info', `📂 Moving to category ${urlIndex+1}/${totalSlots}: ${catName}`);
+              } else {
+                const fmtName = ['Paperback','Hardcover','Kindle'][slot.formatIndex];
+                const mName = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][slot.month];
+                await saveLog(jobId, 'info', `📂 Moving to slot ${urlIndex+1}/${totalSlots}: ${mName} ${slot.year} — ${catName} / ${fmtName}`);
+              }
             }
           }
 
           const slot = monthList[Math.min(urlIndex, totalSlots - 1)];
           // Build date string for this slot's month/year
-          const slotDateFrom = `${slot.year}-${String(slot.month).padStart(2,'0')}-01`;
-          const fmtName = ['Paperback','Hardcover','Kindle'][slot.formatIndex];
+          const slotDateFrom = slot.year ? `${slot.year}-${String(slot.month).padStart(2,'0')}-01` : dateFrom;
+          const fmtName = slot.isNewReleases ? 'New Releases' : ['Paperback','Hardcover','Kindle'][slot.formatIndex];
           const catName = AMAZON_CATEGORY_NODES[slot.catIndex]?.name || `Cat${slot.catIndex}`;
-          const mName = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][slot.month];
+          const mName = slot.month ? ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][slot.month] : '';
 
-          // Advanced Search: scrape 3 pages at a time (most books on first pages, saves BD cost)
-          const MAX_PAGES_PER_SLOT = 3;
+          // New Releases: 20 pages per category (direct requests work = free)
+          // Advanced Search: 3 pages per slot (BD required = costly, keep low)
+          const MAX_PAGES_PER_SLOT = slot.isNewReleases ? 20 : 3;
           const pageBatch = Array.from({length: MAX_PAGES_PER_SLOT}, (_, i) => page_num + i).filter(p => p <= maxPages);
-          await saveLog(jobId, 'info', `📄 [${mName} ${slot.year} / ${catName} / ${fmtName}] pages ${pageBatch.join(',')}...`);
+          const slotLabel = slot.isNewReleases ? `${catName}` : `${mName} ${slot.year} / ${catName} / ${fmtName}`;
+          await saveLog(jobId, 'info', `📄 [${slotLabel}] pages ${pageBatch.join(',')}...`);
 
           // scrapeOnePageSlot uses category + format + month/year URL
           async function scrapeOnePageSlot(pageNum) {
-            const pgUrl = getAmazonUrl(slot.slotUrlIndex, pageNum, '', slotDateFrom, slotDateFrom);
+            // New Releases mode: use category node URL (no month/year filter) — direct requests work, very cheap
+            // Advanced Search mode: use month/year Advanced Search URL
+            const pgUrl = slot.isNewReleases
+              ? `https://www.amazon.com/s?i=stripbooks&rh=n%3A${AMAZON_CATEGORY_NODES[slot.catIndex].id}&s=date-desc-rank&page=${pageNum}`
+              : getAmazonUrl(slot.slotUrlIndex, pageNum, '', slotDateFrom, slotDateFrom);
             try {
               const headers = AMAZON_HEADERS[headerIdx % AMAZON_HEADERS.length];
               headerIdx++;
@@ -1967,13 +1993,13 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
 // POST /api/amazon — Amazon Author Lead Gen (background job)
 // ============================================================
 app.post('/api/amazon', async (req, res) => {
-  const { dateFrom, dateTo, targetLeads = 1000, keyword } = req.body;
+  const { dateFrom, dateTo, targetLeads = 1000, keyword, scrapeMode = 'advanced' } = req.body;
 
   if (!dateFrom || !dateTo) {
     return res.status(400).json({ error: 'dateFrom and dateTo are required' });
   }
 
-  console.log(`[${new Date().toISOString()}] Amazon search: dateFrom=${dateFrom}, dateTo=${dateTo}, targetLeads=${targetLeads}`);
+  console.log(`[${new Date().toISOString()}] Amazon search: mode=${scrapeMode}, dateFrom=${dateFrom}, dateTo=${dateTo}, targetLeads=${targetLeads}`);
 
   // Prevent duplicate jobs — if one is already running, return that job
   const existingJob = await db.prepare(`SELECT id FROM scrape_jobs WHERE framework = 'amazon' AND status = 'running'`).get();
@@ -1983,9 +2009,9 @@ app.post('/api/amazon', async (req, res) => {
 
   // Create scrape job in DB
   const jobResult = await db.prepare(
-    `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status, started_at)
-     VALUES ('amazon', ?, ?, ?, ?, 'running', CURRENT_TIMESTAMP)`
-  ).run(dateFrom, dateTo, keyword || null, targetLeads);
+    `INSERT INTO scrape_jobs (framework, date_from, date_to, keyword, target_leads, status, started_at, scrape_mode)
+     VALUES ('amazon', ?, ?, ?, ?, 'running', CURRENT_TIMESTAMP, ?)`
+  ).run(dateFrom, dateTo, keyword || null, targetLeads, scrapeMode);
   const jobId = jobResult.lastInsertRowid;
 
   // Return job ID immediately so frontend can start polling
@@ -1993,7 +2019,7 @@ app.post('/api/amazon', async (req, res) => {
   res.json({ jobId });
 
   // Run scraping in background
-  setImmediate(() => runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword));
+  setImmediate(() => runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword, scrapeMode));
 });
 
 // ============================================================
@@ -2403,6 +2429,7 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN IF NOT EXISTS book_format TEXT DEFAULT 'Paperback'");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS started_at TEXT");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS hunter_calls INTEGER DEFAULT 0");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN IF NOT EXISTS scrape_mode TEXT DEFAULT 'advanced'");
     } else {
       // SQLite doesn't support IF NOT EXISTS on ALTER TABLE — use try/catch per column
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN resume_url_index INTEGER DEFAULT 0");
@@ -2413,6 +2440,7 @@ const PORT = process.env.PORT || 3000;
       await addColSafe("ALTER TABLE amazon_leads ADD COLUMN book_format TEXT DEFAULT 'Paperback'");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN started_at TEXT");
       await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN hunter_calls INTEGER DEFAULT 0");
+      await addColSafe("ALTER TABLE scrape_jobs ADD COLUMN scrape_mode TEXT DEFAULT 'advanced'");
     }
 
     // Migrate ASIN unique constraint from global → per-job
@@ -2451,7 +2479,7 @@ const PORT = process.env.PORT || 3000;
             console.log(`🔄 Auto-resuming job #${job.id}...`);
             await db.prepare(`UPDATE scrape_jobs SET status='running', completed_at=NULL, started_at=COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id=?`).run(job.id);
             await saveLog(job.id, 'info', `🔄 Auto-resumed after server restart`);
-            runAmazonJob(job.id, job.date_from, job.date_to, job.target_leads, job.keyword);
+            runAmazonJob(job.id, job.date_from, job.date_to, job.target_leads, job.keyword, job.scrape_mode || 'advanced');
           }
           if (interrupted.length > 0) console.log(`✅ Resumed ${interrupted.length} job(s)`);
         } catch(e) {
