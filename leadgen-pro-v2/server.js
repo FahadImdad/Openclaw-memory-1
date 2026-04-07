@@ -1527,7 +1527,9 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
           const catName = AMAZON_CATEGORY_NODES[slot.catIndex]?.name || `Cat${slot.catIndex}`;
           const mName = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][slot.month];
 
-          const pageBatch = Array.from({length: 20}, (_, i) => page_num + i).filter(p => p <= maxPages);
+          // Advanced Search: scrape 3 pages at a time (most books on first pages, saves BD cost)
+          const MAX_PAGES_PER_SLOT = 3;
+          const pageBatch = Array.from({length: MAX_PAGES_PER_SLOT}, (_, i) => page_num + i).filter(p => p <= maxPages);
           await saveLog(jobId, 'info', `📄 [${mName} ${slot.year} / ${catName} / ${fmtName}] pages ${pageBatch.join(',')}...`);
 
           // scrapeOnePageSlot uses category + format + month/year URL
@@ -1560,8 +1562,14 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
             }
           }
 
-          const batchResults = await Promise.all(pageBatch.map(p => scrapeOnePageSlot(p)));
-          page_num += 20;
+          // Scrape pages sequentially — stop early if a page returns 0 books (saves BD cost)
+          const batchResults = [];
+          for (const p of pageBatch) {
+            const books = await scrapeOnePageSlot(p);
+            batchResults.push(books);
+            if (books.length === 0) break; // no more books in this slot, skip remaining pages
+          }
+          page_num += MAX_PAGES_PER_SLOT;
 
           // Save resume position after every batch
           await db.prepare('UPDATE scrape_jobs SET resume_url_index=?, resume_page=? WHERE id=?').run(urlIndex, page_num, jobId);
