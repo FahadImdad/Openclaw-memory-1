@@ -1547,8 +1547,16 @@ async function runAmazonJob(jobId, dateFrom, dateTo, targetLeads, keyword) {
               if (!bdHtml) return [];
               return parseAmazonNewReleasesHtml(bdHtml);
             } catch(e) {
-              await saveLog(jobId, 'warning', `⚠️ Page fetch error: ${e.message}`);
-              return [];
+              // Direct request failed (503, ECONNREFUSED, etc.) — fall back to BD
+              await saveLog(jobId, 'info', `🔄 Direct failed (${e.message.substring(0,40)}), using BD for page ${pageNum}...`);
+              try {
+                const bdHtml = await scrapeWithBrightData(pgUrl, jobId);
+                if (!bdHtml) return [];
+                return parseAmazonNewReleasesHtml(bdHtml);
+              } catch(e2) {
+                await saveLog(jobId, 'warning', `⚠️ BD also failed for page ${pageNum}: ${e2.message.substring(0,40)}`);
+                return [];
+              }
             }
           }
 
