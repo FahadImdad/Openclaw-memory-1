@@ -1,0 +1,44 @@
+# ─── Secrets & Keys ──────────────────────────────────────────────────────────
+.env
+.env.*
+*.env
+env.local
+.env.monitor
+bybit_config.json
+mexc_config.json
+trading_state.json
+sig_b64.txt
+camscan_b64.txt
+*_b64.txt
+*secret*
+*Secret*
+*SECRET*
+
+# ─── Memory files with potential secrets ─────────────────────────────────────
+memory/.dreams/
+memory/leadgen-*.json
+memory/heartbeat-state.json
+
+# ─── Node / Python ───────────────────────────────────────────────────────────
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# ─── Project subfolders (have their own repos) ───────────────────────────────
+leadgen-pro-v2/
+voicedesk/
+amazon-bulk-scraper/
+
+# ─── Build / output files ────────────────────────────────────────────────────
+*.pdf
+*.docx
+*.log
+run_all.log
+scraper_run.log
+
+# ─── OS junk ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
