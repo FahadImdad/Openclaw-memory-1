@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Muhammad Fahad Imdad – CV</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: Arial, sans-serif;
+    font-size: 9.8pt;
+    color: #000;
+    background: #fff;
+  }
+
+  .page {
+    width: 210mm;
+    margin: 0 auto;
+    padding: 15mm 19mm 15mm 19mm;
+  }
+
+  /* HEADER */
+  .name {
+    text-align: center;
+    font-size: 20pt;
+    font-weight: bold;
+    margin-bottom: 3pt;
+  }
+  .contact {
+    text-align: center;
+    font-size: 9pt;
+    color: #333;
+    margin-bottom: 6pt;
+    white-space: nowrap;
+  }
+  .contact a { color: #1155cc; text-decoration: none; }
+
+  /* SECTION */
+  .sec { margin-top: 8pt; }
+  .sec-title {
+    font-size: 10pt;
+    font-weight: bold;
+    border-bottom: 0.7pt solid #000;
+    padding-bottom: 1.5pt;
+    margin-bottom: 5pt;
+    letter-spacing: 0.2pt;
+  }
+
+  /* TWO-COL: org/name row */
+  .tworow {
+    display: table;
+    width: 100%;
+    margin-bottom: 0;
+  }
+  .tworow-left {
+    display: table-cell;
+    font-weight: bold;
+    font-size: 9.8pt;
+  }
+  .tworow-left a { color: #1155cc; text-decoration: none; font-weight: normal; font-size: 8pt; }
+  .tworow-right {
+    display: table-cell;
+    text-align: right;
+    color: #555;
+    font-size: 9pt;
+    white-space: nowrap;
+    width: 1%;
+  }
+
+  /* role/degree row */
+  .subrow {
+    display: table;
+    width: 100%;
+    margin-bottom: 1pt;
+  }
+  .subrow-left {
+    display: table-cell;
+    font-size: 9.8pt;
+  }
+  .subrow-left.italic { font-style: italic; }
+  .subrow-right {
+    display: table-cell;
+    text-align: right;
+    color: #555;
+    font-size: 9pt;
+    white-space: nowrap;
+    width: 1%;
+  }
+
+  /* PROJECT */
+  .proj { margin-bottom: 5pt; }
+  .proj-title { font-weight: bold; font-size: 9.8pt; }
+  .proj-title a { color: #1155cc; text-decoration: none; font-weight: normal; font-size: 8pt; }
+  .proj-desc { font-size: 9.8pt; line-height: 1.42; }
+
+  /* BULLETS */
+  .blist { margin: 2pt 0 4pt 0; padding-left: 14pt; }
+  .blist li { font-size: 9.8pt; line-height: 1.45; margin-bottom: 1pt; list-style: disc; }
+
+  /* EXP BLOCK */
+  .exp { margin-bottom: 6pt; }
+
+  /* SKILL ROW */
+  .sk { font-size: 9.8pt; line-height: 1.45; margin-bottom: 1pt; }
+  .sk b { font-weight: bold; }
+
+  /* AWARD / CERT */
+  .aw { font-size: 9.8pt; line-height: 1.45; margin-bottom: 1.5pt; }
+  .aw b { font-weight: bold; }
+  .aw a { color: #1155cc; text-decoration: none; }
+
+  /* PAGE BREAK */
+  .pb { page-break-before: always; }
+
+  @media print {
+    @page { size: A4; margin: 0; }
+    body { -webkit-print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- NAME -->
+<div class="name">Muhammad Fahad Imdad</div>
+
+<!-- CONTACT -->
+<div class="contact">
+  <a href="tel:+923147800991">+92 314 7800991</a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="mailto:fahadimdad966@gmail.com">fahadimdad966@gmail.com</a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://linkedin.com/in/muhammadfahadimdad">linkedin.com/in/muhammadfahadimdad</a> <a href="https://linkedin.com/in/muhammadfahadimdad">↗</a>
+  &nbsp;&nbsp;|&nbsp;&nbsp;
+  <a href="https://fahadimdad.com/">fahadimdad.com</a> <a href="https://fahadimdad.com/">↗</a>
+</div>
+
+<!-- EDUCATION -->
+<div class="sec">
+  <div class="sec-title">EDUCATION</div>
+
+  <div class="tworow">
+    <div class="tworow-left"><a href="https://shu.edu.pk/" style="color:#000;font-weight:bold;">Salim Habib University</a> <a href="https://shu.edu.pk/">↗</a></div>
+    <div class="tworow-right">Karachi, Pakistan</div>
+  </div>
+  <div class="subrow" style="margin-bottom:4pt;">
+    <div class="subrow-left">B.S. in Computer Science – CGPA 3.68/4.0&nbsp;&nbsp;|&nbsp;&nbsp;<b>Gold Medalist</b></div>
+    <div class="subrow-right">March 2021 – May 2025</div>
+  </div>
+
+  <div class="tworow">
+    <div class="tworow-left">Private</div>
+    <div class="tworow-right">Karachi, Pakistan</div>
+  </div>
+  <div class="subrow" style="margin-bottom:0;">
+    <div class="subrow-left">GCE AS &amp; A Level</div>
+    <div class="subrow-right">July 2019 – Nov 2020</div>
+  </div>
+</div>
+
+<!-- PROJECTS -->
+<div class="sec">
+  <div class="sec-title">PROJECTS</div>
+
+  <div class="proj">
+    <div class="proj-title">Robotic Arm via LLMs <a href="https://www.fahadimdad.com/projects/ai-robotics/robotics-embodied-ai-systems">↗</a></div>
+    <div class="proj-desc">Speech-controlled robotic arm simulator using LLMs, speech recognition, and forward kinematics for real-time 3D motion.</div>
+  </div>
+
+  <div class="proj">
+    <div class="proj-title">Robotic Arm via Computer Vision <a href="https://www.fahadimdad.com/projects/ai-robotics/robotics-embodied-ai-systems">↗</a></div>
+    <div class="proj-desc">Hand-tracking robotic arm using MediaPipe and OpenCV with gesture-based control and real-time visualization.</div>
+  </div>
+
+  <div class="proj">
+    <div class="proj-title">AR Circuit Simulator <a href="https://www.fahadimdad.com/projects/immersive-tech-arvrxr">↗</a></div>
+    <div class="proj-desc">AR-based electronic circuit simulator using Unity and ARCore; integrated AI model for hardware detection and virtual component overlay.</div>
+  </div>
+
+  <div class="proj">
+    <div class="proj-title">AI-Powered Conversational Shopping Platform <a href="https://www.fahadimdad.com/projects/ai-robotics/conversational-agents-recommender-systems">↗</a></div>
+    <div class="proj-desc">Full-stack e-commerce platform using React, FastAPI and Azure OpenAI with multi-agentic LLMs, LangChain, vector-based RAG, and context-aware recommendations.</div>
+  </div>
+
+  <div class="proj">
+    <div class="proj-title">Medical Claim App <a href="https://www.fahadimdad.com/projects/ai-robotics/multimodal-generative-ai-systems">↗</a></div>
+    <div class="proj-desc">AI-powered app using Azure OCR and Azure OpenAI to extract and validate medical prescriptions against company health policy.</div>
+  </div>
+
+  <div class="proj">
+    <div class="proj-title">Brain Tumor Classification</div>
+    <div class="proj-desc">Deep learning model to classify brain tumors from MRI scans. Presented at Sindh HEC Research Showcase 2024.</div>
+  </div>
+
+  <div class="proj">
+    <div class="proj-title">Visual Defect Detection <a href="https://www.fahadimdad.com/projects/ai-robotics/computer-vision-real-time-ai">↗</a></div>
+    <div class="proj-desc">ResNet50-based classifier trained on MVTec AD dataset with a Streamlit UI for industrial defect recognition.</div>
+  </div>
+
+  <div class="proj">
+    <div class="proj-title">Vehicle Counting &amp; Speed Detection (YOLOv8 &amp; YOLOv11) <a href="https://www.fahadimdad.com/projects/ai-robotics/computer-vision-real-time-ai">↗</a></div>
+    <div class="proj-desc">Lane-wise vehicle counting (YOLOv8) and speed estimation (YOLOv11) with real-time vehicle tracking.</div>
+  </div>
+
+  <div class="proj">
+    <div class="proj-title">Fire Detection (YOLOv8) <a href="https://www.fahadimdad.com/projects/ai-robotics/computer-vision-real-time-ai">↗</a></div>
+    <div class="proj-desc">YOLOv8-based fire detection system trained on video footage for safety and incident analysis.</div>
+  </div>
+
+  <div class="proj" style="margin-bottom:0;">
+    <div class="proj-title">AI Medical Interview Platform <a href="https://www.fahadimdad.com/projects/ai-robotics/multimodal-generative-ai-systems">↗</a></div>
+    <div class="proj-desc">Personalized interview simulator for radiology professionals using Google Gemini, voice-based Q&amp;A with real-time transcription, rubric-based AI feedback, and computer vision proctoring for exam integrity.</div>
+  </div>
+</div>
+
+<!-- EXPERIENCES -->
+<div class="sec">
+  <div class="sec-title">EXPERIENCES</div>
+
+  <div class="exp">
+    <div class="tworow">
+      <div class="tworow-left"><a href="https://beam.ai/" style="color:#000;font-weight:bold;">Beam AI</a> <a href="https://beam.ai/">↗</a></div>
+      <div class="tworow-right">Karachi, Pakistan</div>
+    </div>
+    <div class="subrow">
+      <div class="subrow-left italic">AI Agent Engineer</div>
+      <div class="subrow-right">Nov 2025 – Present</div>
+    </div>
+    <ul class="blist">
+      <li>Designed and deployed autonomous AI agents replacing manual business processes with intelligent, fully automated systems.</li>
+      <li>Built multi-step agent architectures using graph-based workflow systems, LLM orchestration, and external tool integration for enterprise clients including Booth &amp; Partner and UNiDAYS.</li>
+      <li>Implemented dynamic task routing, error handling, retry logic, and context management for long-running multi-step workflows.</li>
+      <li>Integrated enterprise systems (Airtable, Slack, email) and developed evaluation frameworks with feedback loops for continuous improvement.</li>
+    </ul>
+  </div>
+
+  <div class="exp">
+    <div class="tworow">
+      <div class="tworow-left"><a href="https://www.systemsltd.com/" style="color:#000;font-weight:bold;">Systems Limited</a> <a href="https://www.systemsltd.com/">↗</a></div>
+      <div class="tworow-right">Karachi, Pakistan</div>
+    </div>
+    <div class="subrow">
+      <div class="subrow-left italic">AI &amp; Data Science Intern</div>
+      <div class="subrow-right">June 2025 – Oct 2025</div>
+    </div>
+    <ul class="blist">
+      <li>Built AI solutions across Computer Vision, NLP, and Generative AI for enterprise use cases.</li>
+      <li>Led development of Medical Claim App (Azure OCR + Azure OpenAI) and AI-powered chat shopping platform (React, Azure OpenAI).</li>
+      <li>Trained and evaluated models using Python, Scikit-learn, TensorFlow and Keras; hands-on experience with Azure Machine Learning and Azure Cognitive Services.</li>
+    </ul>
+  </div>
+
+  <div class="exp">
+    <div class="tworow">
+      <div class="tworow-left"><a href="https://www.fahadimdad.com/leadership/roles-responsibilities" style="color:#000;font-weight:bold;">IEEE Computer Society, Salim Habib University</a> <a href="https://www.fahadimdad.com/leadership/roles-responsibilities">↗</a></div>
+      <div class="tworow-right">Karachi, Pakistan</div>
+    </div>
+    <div class="subrow">
+      <div class="subrow-left italic">Chairperson</div>
+      <div class="subrow-right">July 2024 – Dec 2024</div>
+    </div>
+    <ul class="blist">
+      <li>Led the chapter organising workshops, competitions, and networking events; expanded membership and industry-academia collaborations.</li>
+    </ul>
+  </div>
+
+  <div class="exp">
+    <div class="tworow">
+      <div class="tworow-left"><a href="https://www.fahadimdad.com/leadership/roles-responsibilities" style="color:#000;font-weight:bold;">IEEE SHU Student Branch, Salim Habib University</a> <a href="https://www.fahadimdad.com/leadership/roles-responsibilities">↗</a></div>
+      <div class="tworow-right">Karachi, Pakistan</div>
+    </div>
+    <div class="subrow">
+      <div class="subrow-left italic">Head of Operating Committees &amp; Webmaster</div>
+      <div class="subrow-right">Dec 2023 – Dec 2024</div>
+    </div>
+    <ul class="blist">
+      <li>Organised TechNexus flagship event; developed Women in Engineering (WIE) Society, COMSOC, and EMBS within IEEE SHU.</li>
+    </ul>
+  </div>
+
+  <div class="exp" style="margin-bottom:0;">
+    <div class="tworow">
+      <div class="tworow-left"><a href="https://smartcitylab.neduet.edu.pk/" style="color:#000;font-weight:bold;">Smart City Lab, NCAI-NEDUET</a> <a href="https://smartcitylab.neduet.edu.pk/">↗</a></div>
+      <div class="tworow-right">Karachi, Pakistan</div>
+    </div>
+    <div class="subrow">
+      <div class="subrow-left italic">Research Intern</div>
+      <div class="subrow-right">Mar 2023 – Aug 2023</div>
+    </div>
+    <ul class="blist">
+      <li>Developed AR application for electronic circuit simulation using Unity, ARCore and AI; integrated AI model for hardware detection and virtual overlay superimposition.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- LEADERSHIP -->
+<div class="sec">
+  <div class="sec-title">LEADERSHIP ACTIVITIES</div>
+
+  <div class="exp" style="margin-bottom:0;">
+    <div class="tworow">
+      <div class="tworow-left"><a href="https://www.fahadimdad.com/leadership/event-organization" style="color:#000;font-weight:bold;">NASA Space App Challenge</a> <a href="https://www.fahadimdad.com/leadership/event-organization">↗</a></div>
+      <div class="tworow-right">Karachi, Pakistan</div>
+    </div>
+    <div class="subrow">
+      <div class="subrow-left italic">Organizer, Logistics Team Lead and Ambassador</div>
+      <div class="subrow-right">Oct 2022 &amp; Oct 2023</div>
+    </div>
+    <ul class="blist">
+      <li>Organised NASA Space Apps Challenge at Salim Habib University (2022) and Habib University (2023); led logistics team ensuring smooth operations.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- SKILLS -->
+<div class="sec">
+  <div class="sec-title">SKILLS &amp; LANGUAGE PROFICIENCIES</div>
+  <div class="sk"><b>Technologies:</b>&nbsp;&nbsp;OpenCV, TensorFlow, Keras, Scikit-learn, PyTorch, MediaPipe, ARCore, Unity, LangChain, Hugging Face Transformers, Docker, Azure AI Services, Jupyter Notebook, Git, Flutter, Firebase, Arduino IDE</div>
+  <div class="sk"><b>Technical Skills:</b>&nbsp;&nbsp;AI, Machine Learning, Deep Learning, Computer Vision, NLP, Agentic AI &amp; LLM Orchestration, Robotics, AR/VR, Model Training &amp; Evaluation, Data Analysis, Feature Engineering</div>
+  <div class="sk"><b>Programming Languages:</b>&nbsp;&nbsp;Python, C++, Java, JavaFX, Dart, C#, LaTeX</div>
+  <div class="sk"><b>Soft Skills:</b>&nbsp;&nbsp;Communication, Leadership, Problem-Solving, Critical Thinking, Team Management, Research</div>
+  <div class="sk"><b>Languages:</b>&nbsp;&nbsp;Sindhi (Native), Urdu (Native), English (Fluent)</div>
+</div>
+
+<!-- AWARDS -->
+<div class="sec">
+  <div class="sec-title">AWARDS</div>
+  <div class="aw">•&nbsp;&nbsp;<b>Gold Medal</b>&nbsp;&nbsp;– Presented by Department of Information Technology, Salim Habib University</div>
+  <div class="aw">•&nbsp;&nbsp;<b>Galactic Problem Solver</b>&nbsp;&nbsp;– Presented by NASA Space App Challenge (Oct 2022, Oct 2023)</div>
+  <div class="aw">•&nbsp;&nbsp;<b><a href="https://www.fahadimdad.com/achievements_2/academic-awards">Dean Honor Award ↗</a></b>&nbsp;&nbsp;– Presented by Dean, Department of Information Technology, Salim Habib University (Spring 2021, Spring 2022, Fall 2022, Spring 2023, Fall 2023, Spring 2024, Fall 2024)</div>
+</div>
+
+<!-- CERTIFICATIONS -->
+<div class="sec">
+  <div class="sec-title">ONLINE COURSES &amp; CERTIFICATIONS</div>
+  <div class="aw">•&nbsp;&nbsp;<b>AI Agents in LangGraph</b>&nbsp;&nbsp;– DeepLearning.AI – Coursera</div>
+  <div class="aw">•&nbsp;&nbsp;<b>Supervised Machine Learning: Regression and Classification</b>&nbsp;&nbsp;– DeepLearning.AI – Coursera</div>
+  <div class="aw">•&nbsp;&nbsp;<b>IBM RAG and Agentic AI</b>&nbsp;&nbsp;– IBM – Coursera –&nbsp;&nbsp;<i>ongoing</i></div>
+  <div class="aw">•&nbsp;&nbsp;<b>IBM AI Developer</b>&nbsp;&nbsp;– IBM – Coursera –&nbsp;&nbsp;<i>ongoing</i></div>
+  <div class="aw">•&nbsp;&nbsp;<b>Fundamentals of Agentic AI and DACA AI-First Development</b>&nbsp;&nbsp;– Panaversity –&nbsp;&nbsp;<i>ongoing</i></div>
+</div>
+
+</div>
+</body>
+</html>

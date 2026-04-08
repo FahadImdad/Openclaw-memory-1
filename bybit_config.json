@@ -1,0 +1,8 @@
+{
+  "exchange": "bybit",
+  "api_key": "fHzec0hf0le96eQaVA",
+  "secret_key": "8iYvOIqUSmdV3Jz8wwgfZeTU58muGVd5hW8m",
+  "created": "2026-02-01",
+  "permissions": ["contracts", "spot", "unified_trading", "wallet_transfer", "exchange"],
+  "notes": "Fahad's Bybit account - NO withdrawal permission"
+}

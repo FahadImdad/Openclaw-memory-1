@@ -1,0 +1,13 @@
+{
+  "lastChecks": {
+    "email": null,
+    "calendar": null,
+    "weather": null
+  },
+  "leadgen": {
+    "lastChecked": 1743792000,
+    "lastCompletedJob": 10,
+    "notifiedJobs": [3, 7, 8, 10],
+    "verifiedCountMap": { "3": 102, "7": 10, "8": 100, "10": 1 }
+  }
+}

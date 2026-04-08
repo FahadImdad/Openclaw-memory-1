@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Jarvis</title>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+        }
+        h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            color: #00d4ff;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 40px;
+        }
+        #status {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            background: #333366;
+            margin: 0 auto 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3em;
+            transition: all 0.3s;
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
+        }
+        #status.listening { background: #ff4444; animation: pulse 1s infinite; }
+        #status.processing { background: #ffaa00; }
+        #status.speaking { background: #00ff00; }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        #statusText {
+            font-size: 1.5em;
+            margin-bottom: 30px;
+        }
+        button {
+            font-size: 1.5em;
+            padding: 20px 50px;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.3s;
+        }
+        #speakBtn {
+            background: linear-gradient(135deg, #4a4a8a, #6a6aaa);
+            color: white;
+        }
+        #speakBtn:hover { transform: scale(1.05); }
+        #speakBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+        #stopBtn {
+            background: #8a4a4a;
+            color: white;
+        }
+        #log {
+            width: 100%;
+            max-width: 500px;
+            height: 200px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 30px;
+            overflow-y: auto;
+            text-align: left;
+        }
+        .log-entry { margin: 10px 0; }
+        .log-user { color: #00aaff; }
+        .log-jarvis { color: #00ff00; }
+        .log-system { color: #888; }
+        .error { color: #ff4444; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 JARVIS</h1>
+        <p class="subtitle">Voice Assistant</p>
+        
+        <div id="status">🎤</div>
+        <div id="statusText">Ready</div>
+        
+        <button id="speakBtn" onclick="startListening()">🎤 SPEAK</button>
+        <button id="stopBtn" onclick="stopSpeaking()">⏹ STOP</button>
+        
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let recognition = null;
+        let synthesis = window.speechSynthesis;
+        let isListening = false;
+        
+        // Check browser support
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+            log('Speech recognition not supported in this browser. Use Chrome or Safari.', 'error');
+        } else {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+            
+            recognition.onstart = () => {
+                setStatus('listening', '🎤', 'Listening...');
+                log('Listening...', 'system');
+            };
+            
+            recognition.onresult = (event) => {
+                const text = event.results[0][0].transcript;
+                log('You: ' + text, 'user');
+                setStatus('processing', '💭', 'Thinking...');
+                sendToJarvis(text);
+            };
+            
+            recognition.onerror = (event) => {
+                log('Error: ' + event.error, 'error');
+                setStatus('ready', '🎤', 'Ready');
+                document.getElementById('speakBtn').disabled = false;
+            };
+            
+            recognition.onend = () => {
+                isListening = false;
+                if (document.getElementById('statusText').innerText === 'Listening...') {
+                    setStatus('ready', '🎤', 'Ready');
+                }
+                document.getElementById('speakBtn').disabled = false;
+            };
+        }
+        
+        function setStatus(state, emoji, text) {
+            const statusEl = document.getElementById('status');
+            statusEl.className = state;
+            statusEl.innerText = emoji;
+            document.getElementById('statusText').innerText = text;
+        }
+        
+        function log(message, type = 'system') {
+            const logEl = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry log-' + type;
+            entry.innerText = message;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        function startListening() {
+            if (!recognition) {
+                log('Speech recognition not available', 'error');
+                return;
+            }
+            document.getElementById('speakBtn').disabled = true;
+            isListening = true;
+            recognition.start();
+        }
+        
+        function stopSpeaking() {
+            synthesis.cancel();
+            if (recognition && isListening) {
+                recognition.stop();
+            }
+            setStatus('ready', '🎤', 'Ready');
+        }
+        
+        function sendToJarvis(text) {
+            // Since we can't call openclaw from browser, we'll use fetch to a local server
+            // For now, just simulate with browser TTS
+            
+            // Show we're "thinking"
+            setTimeout(() => {
+                const response = "I heard you say: " + text + ". To connect me to OpenClaw, run the Python server version.";
+                log('Jarvis: ' + response, 'jarvis');
+                speak(response);
+            }, 1000);
+        }
+        
+        function speak(text) {
+            setStatus('speaking', '🔊', 'Speaking...');
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1;
+            utterance.pitch = 1;
+            utterance.onend = () => {
+                setStatus('ready', '🎤', 'Ready');
+            };
+            synthesis.speak(utterance);
+        }
+        
+        // Welcome message
+        setTimeout(() => {
+            log('Jarvis ready! Click SPEAK to talk.', 'system');
+        }, 500);
+    </script>
+</body>
+</html>

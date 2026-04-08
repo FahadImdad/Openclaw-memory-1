@@ -1,0 +1,8 @@
+{
+  "exchange": "mexc",
+  "api_key": "mx0vglYGjOAnNvm6dx",
+  "secret_key": "4bbfb579039a4238b2468174b273752d",
+  "created": "2026-02-01",
+  "permissions": ["spot_read", "spot_trade", "transfer"],
+  "notes": "Fahad's trading account - NO withdrawal permission"
+}
