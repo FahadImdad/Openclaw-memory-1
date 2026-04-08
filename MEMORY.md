@@ -99,7 +99,7 @@ Fahad decided to quit crypto trading. Don't bring it up or suggest trades.
 - Live URL: https://leadgen-pro-v2-5dlr.onrender.com (new Render account, Starter $7/mo)
 - Latest commit: `734ec7f`
 - DB: Neon PostgreSQL
-- Hunter API key: `e97aecd5f043bfa382d8b0c0dbf15a9532b2f294` (Data Platform, 1000 credits)
+- Hunter API key: `12a3ad7ffd50a2b26c71fa7ed82a600259eaea80` (Data Platform, rotated Apr 8 2026)
 
 **Working pipeline (confirmed Task #20 — 6 HIGH leads in 11 min, $0.046 BD cost):**
 1. Amazon scrape → 320 books/batch, 150 workers
@@ -114,7 +114,7 @@ Fahad decided to quit crypto trading. Don't bring it up or suggest trades.
 **Next:** Suleman to run production tasks. Quality confirmed matches Task #8.
 
 ## LeadGen Monitor State
-- **Last checked:** 2026-04-07 14:35 UTC
+- **Last checked:** 2026-04-08 15:37 UTC
 - **Service status:** ⚠️ SUSPENDED (user-initiated, since 2026-04-06T16:17:17Z)
 - **API reachable:** No (503 — service suspended)
 - **Auto-restart:** NOT triggered (user-initiated suspension, not a crash)
